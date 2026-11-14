@@ -1,0 +1,68 @@
+{
+  "source": "o3p_mcp branch 20.0 at ad8c9a9 on Odoo 20.0-20261112 (generated from the code, not edited by hand)",
+  "data_api_errors": [
+    {
+      "code": "invalid_params",
+      "status": 400,
+      "body": "{\"error\": {\"code\": \"invalid_params\", \"message\": \"The parameters are not valid.\"}}"
+    },
+    {
+      "code": "invalid_client",
+      "status": 401,
+      "body": "{\"error\": {\"code\": \"invalid_client\", \"message\": \"Client authentication failed.\"}}"
+    },
+    {
+      "code": "invalid_token",
+      "status": 403,
+      "body": "{\"error\": {\"code\": \"invalid_token\", \"message\": \"The access token is not valid.\"}}"
+    },
+    {
+      "code": "insufficient_scope",
+      "status": 403,
+      "body": "{\"error\": {\"code\": \"insufficient_scope\", \"message\": \"The access token does not allow this operation.\"}}"
+    },
+    {
+      "code": "access_denied",
+      "status": 403,
+      "body": "{\"error\": {\"code\": \"access_denied\", \"message\": \"You are not allowed to read this.\"}}"
+    },
+    {
+      "code": "unknown_op",
+      "status": 404,
+      "body": "{\"error\": {\"code\": \"unknown_op\", \"message\": \"Unknown operation.\"}}"
+    },
+    {
+      "code": "unknown_model",
+      "status": 404,
+      "body": "{\"error\": {\"code\": \"unknown_model\", \"message\": \"Unknown model.\"}}"
+    },
+    {
+      "code": "result_too_large",
+      "status": 413,
+      "body": "{\"error\": {\"code\": \"result_too_large\", \"message\": \"The result is too large; ask for fewer records or fields.\"}}"
+    },
+    {
+      "code": "query_error",
+      "status": 422,
+      "body": "{\"error\": {\"code\": \"query_error\", \"message\": \"The query could not be run.\"}}"
+    },
+    {
+      "code": "timeout",
+      "status": 504,
+      "body": "{\"error\": {\"code\": \"timeout\", \"message\": \"The query took too long.\"}}"
+    }
+  ],
+  "data_api_messages": {
+    "MSG_AGGREGATES": "aggregates are not valid: use __count, field:sum|avg|min|max on numeric readable fields, or field:count|count_distinct on stored readable fields.",
+    "MSG_DOMAIN": "The domain is not valid, or uses a field that is unknown, hidden or not readable.",
+    "MSG_FIELDS": "A requested field is unknown, hidden or not readable.",
+    "MSG_GROUPBY": "groupby is not valid: use groupable readable fields; date fields need a granularity (day, week, month, quarter, year, or hour for datetimes).",
+    "MSG_GROUP_ORDER": "The order is not valid: use groupby or aggregate items with asc or desc.",
+    "MSG_IDS": "ids must be a list of 1 to 100 record ids.",
+    "MSG_KEYS": "The operation does not take one of the parameters.",
+    "MSG_ORDER": "The order is not valid: use 'field' or 'field desc' items on sortable readable fields.",
+    "MSG_RANGE": "limit or offset is out of range."
+  },
+  "introspection_inactive": "{\"active\": false}",
+  "oauth_invalid_client": "{\"error\": \"invalid_client\", \"error_description\": \"Client authentication failed.\"}"
+}

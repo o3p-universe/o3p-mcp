@@ -431,3 +431,7 @@ in a throw-away database, runs its tests and removes the containers again.
 `ODOO_SERIES=20.0` selects another image; the Compose project is
 `o3p-mcp-test18` for Odoo 18. An optional argument replaces the default test
 tags (`/o3p_mcp`).
+
+`tests/fixtures/contract_20.json` holds the data API error bodies, their fixed
+messages and the introspection answers generated from the `20.0` branch; the
+tests compare the answers on Odoo 18 with it byte for byte.
