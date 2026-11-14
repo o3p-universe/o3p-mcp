@@ -94,12 +94,13 @@ MSG_AGGREGATES = (
     "readable fields, or field:count|count_distinct on stored readable fields."
 )
 MSG_GROUP_ORDER = "The order is not valid: use groupby or aggregate items with asc or desc."
-# Domain operators accepted from clients.
+# Domain operators accepted from clients. child_of and parent_of are not:
+# Odoo walks the hierarchy as superuser, through records the user may not
+# read, so the answer would reveal how hidden records are linked.
 OPERATORS = frozenset(
     {
         "=", "!=", ">", ">=", "<", "<=", "=?", "in", "not in", "like", "not like",
-        "ilike", "not ilike", "=like", "=ilike", "child_of", "parent_of", "any",
-        "not any",
+        "ilike", "not ilike", "=like", "=ilike", "any", "not any",
     }
 )
 
