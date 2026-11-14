@@ -126,6 +126,17 @@ class TestTokens(O3pMcpCommon, TransactionCase):
             scopes={"okf.read", "okf.write"},
         )
 
+    def test_rotate_ignores_offline_access_and_unknown_scopes(self):
+        _token, first = self.issue()
+        _new, second = self.Token._rotate(
+            first["refresh_token"], self.client, scopes={"offline_access"}
+        )
+        self.assertEqual(second["scope"], "okf.read okf.write")
+        _new, third = self.Token._rotate(
+            second["refresh_token"], self.client, scopes={"okf.read", "nope"}
+        )
+        self.assertEqual(third["scope"], "okf.read")
+
     def test_rotate_requires_read_scope_before_claiming(self):
         token, first = self.issue()
         self.assertOAuthError(
