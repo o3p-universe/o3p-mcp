@@ -285,6 +285,17 @@ part, or a parameter the operation does not take, is refused with
   that do not exist and records the user may not read are left out alike,
   so the answer does not reveal whether a hidden record exists.
 
+### Values Odoo computes with elevated rights
+
+The API shows what Odoo itself shows the user, no less and no more. Some
+fields are computed by Odoo with elevated rights, and their values are
+visible exactly as in Odoo's own interface for that user. For example, with
+the stock and sale apps, a product's forecast quantities (`outgoing_qty`,
+`virtual_available`) count every confirmed sales order, including orders of
+other salespeople the user may not open; the API returns the same numbers
+the product form shows that user. Add such fields to the hidden field names
+if they should not reach MCP clients.
+
 ### Hidden models and fields
 
 Some data is never exposed, whatever the user's rights, administrators
