@@ -10,6 +10,7 @@ from .oauth import (
     CLIENT_AUTH_METHODS,
     GRANT_TYPES,
     OAuthError,
+    get_config_int,
     hash_secret,
     is_allowed_redirect_uri,
     new_secret,
@@ -28,7 +29,10 @@ AUTH_METHODS = list(
         strict=True,
     )
 )
-REGISTRATION_LIMIT = 20
+# Hosted connectors register every user's client from a few shared
+# addresses, so the default leaves room for a whole organisation.
+DEFAULT_REGISTRATION_LIMIT = 200
+MAX_REGISTRATION_LIMIT = 100_000
 REGISTRATION_WINDOW = timedelta(hours=1)
 MAX_REDIRECT_URIS = 10
 MAX_CLIENT_NAME_LENGTH = 100
@@ -213,10 +217,17 @@ class O3pMcpClient(models.Model):
         return client
 
     @api.model
+    def _registration_limit(self):
+        limit = get_config_int(
+            self.env, "o3p_mcp.registration_limit", DEFAULT_REGISTRATION_LIMIT
+        )
+        return limit if limit > 0 else DEFAULT_REGISTRATION_LIMIT
+
+    @api.model
     def _register_client(self, metadata, ip):
         """Register a client from RFC 7591 ``metadata``; return the response.
 
-        At most ``REGISTRATION_LIMIT`` clients are registered per hour and
+        At most ``o3p_mcp.registration_limit`` clients are registered per hour and
         IPv4 address or IPv6 /64 network. The client secret, for confidential clients, appears only in the
         returned response.
         """
@@ -225,7 +236,7 @@ class O3pMcpClient(models.Model):
         recent = self.sudo().with_context(active_test=False).search_count(
             [("registration_bucket", "=", address_bucket(ip)), ("create_date", ">=", since)]
         )
-        if recent >= REGISTRATION_LIMIT:
+        if recent >= self._registration_limit():
             raise OAuthError(
                 "temporarily_unavailable",
                 "Too many client registrations from this address; try again later.",

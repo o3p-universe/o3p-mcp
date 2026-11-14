@@ -92,8 +92,11 @@ types are `authorization_code` and optionally `refresh_token`; the only
 response type is `code`. Confidential clients receive their `client_secret`
 once, in the registration response.
 
-Each IPv4 address, or IPv6 /64 network, may register at most 20 clients per
-hour; further requests get HTTP 429 with `Retry-After`. A self-registered
+Each IPv4 address, or IPv6 /64 network, may register at most 200 clients per
+hour (a setting); further requests get HTTP 429 with `Retry-After`. The limit
+is that high because hosted connectors register every user's client from a
+few shared addresses, so all the people of one organisation who connect in
+the same hour count against one address. A self-registered
 client that has not completed a token exchange within 24 hours is deleted.
 
 ### Authorization
@@ -312,6 +315,7 @@ values under `o3p_mcp.*`:
 | MCP server URL: the public MCP endpoint, the only resource and token audience | `o3p_mcp.resource_url` | empty |
 | Access token lifetime, 1 to 1440 minutes | `o3p_mcp.access_token_minutes` | 60 |
 | Refresh token lifetime, 1 to 365 days, counted from each refresh | `o3p_mcp.refresh_token_days` | 30 |
+| Client registrations per hour from one address or IPv6 /64, 1 to 100000 | `o3p_mcp.registration_limit` | 200 |
 | Data API hidden models, one pattern per line | `o3p_mcp.api_denied_models` | see Data API |
 | Data API hidden field names, one pattern per line | `o3p_mcp.api_denied_fields` | see Data API |
 | Data API largest answer (KB; stored in bytes) | `o3p_mcp.api_max_response_bytes` | 1000 KB |

@@ -13,6 +13,7 @@ from .api import (
     DEFAULT_TIMEOUT_SECONDS,
     patterns,
 )
+from .mcp_client import DEFAULT_REGISTRATION_LIMIT, MAX_REGISTRATION_LIMIT
 from .oauth import (
     DEFAULT_ACCESS_TOKEN_MINUTES,
     DEFAULT_REFRESH_TOKEN_DAYS,
@@ -78,6 +79,13 @@ class ResConfigSettings(models.TransientModel):
         string="Access token lifetime (minutes)",
         default=DEFAULT_ACCESS_TOKEN_MINUTES,
     )
+    o3p_mcp_registration_limit = fields.Integer(
+        string="Client registrations per hour",
+        default=DEFAULT_REGISTRATION_LIMIT,
+        help="Clients that may register per hour from one address (IPv6: one /64 "
+        "network). Hosted connectors register all their users from a few shared "
+        "addresses.",
+    )
     o3p_mcp_refresh_token_days = fields.Integer(
         string="Refresh token lifetime (days)",
         default=DEFAULT_REFRESH_TOKEN_DAYS,
@@ -140,6 +148,9 @@ class ResConfigSettings(models.TransientModel):
             o3p_mcp_access_token_minutes=get_config_int(self.env,
                 "o3p_mcp.access_token_minutes", DEFAULT_ACCESS_TOKEN_MINUTES
             ),
+            o3p_mcp_registration_limit=get_config_int(
+                self.env, "o3p_mcp.registration_limit", DEFAULT_REGISTRATION_LIMIT
+            ),
             o3p_mcp_refresh_token_days=get_config_int(self.env,
                 "o3p_mcp.refresh_token_days", DEFAULT_REFRESH_TOKEN_DAYS
             ),
@@ -186,6 +197,13 @@ class ResConfigSettings(models.TransientModel):
                     max=MAX_ACCESS_TOKEN_MINUTES,
                 )
             )
+        if not 1 <= self.o3p_mcp_registration_limit <= MAX_REGISTRATION_LIMIT:
+            raise UserError(
+                self.env._(
+                    "The client registrations per hour must be between 1 and %(max)s.",
+                    max=MAX_REGISTRATION_LIMIT,
+                )
+            )
         if not 1 <= self.o3p_mcp_refresh_token_days <= MAX_REFRESH_TOKEN_DAYS:
             raise UserError(
                 self.env._(
@@ -217,6 +235,7 @@ class ResConfigSettings(models.TransientModel):
         set_config(self.env, "o3p_mcp.resource_url", resource_url)
         set_config(self.env, "o3p_mcp.access_token_minutes", self.o3p_mcp_access_token_minutes)
         set_config(self.env, "o3p_mcp.refresh_token_days", self.o3p_mcp_refresh_token_days)
+        set_config(self.env, "o3p_mcp.registration_limit", self.o3p_mcp_registration_limit)
         return result
 
     def action_o3p_mcp_rotate_credentials(self):
