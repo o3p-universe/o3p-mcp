@@ -1,4 +1,5 @@
 import json
+import resource
 import time
 from unittest.mock import patch
 
@@ -150,6 +151,42 @@ class TestSqlLimits(O3pMcpSqlCase):
         self.assertApiError(
             self.sql_call("SELECT repeat('x', 1000)", user="admin"), "result_too_large"
         )
+
+    def peak_growth_mb(self, query, limit=1):
+        """Answer ``query`` and return (response, growth of the process's peak RSS in MB)."""
+        before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        response = self.sql_call(query, limit=limit)
+        return response, (resource.getrusage(resource.RUSAGE_SELF).ru_maxrss - before) // 1024
+
+    def test_large_answers_never_reach_the_worker(self):
+        # 250,000 rows of 1 kB with limit 1: only two rows leave the sandbox.
+        response, growth = self.peak_growth_mb("SELECT repeat('x', 1000) FROM generate_series(1, 250000)")
+        self.assertEqual(response.status_code, 200, response.text[:300])
+        self.assertEqual(response.json()["result"]["truncated"], True)
+        self.assertLess(growth, 30)
+        # One 500 MB value: the sandbox measures it and sends nothing.
+        response, growth = self.peak_growth_mb("SELECT repeat('x', 500000000) AS big")
+        self.assertApiError(response, "result_too_large")
+        self.assertLess(growth, 30)
+        # Rows that add up to more than the largest answer.
+        response, growth = self.peak_growth_mb("SELECT repeat('x', 100000) FROM generate_series(1, 50)", limit=50)
+        self.assertApiError(response, "result_too_large")
+        self.assertLess(growth, 30)
+        # Below the limit, values come whole.
+        self.assertEqual(len(self.sql_result("SELECT repeat('x', 500000)")["rows"][0][0]), 500_000)
+
+    def test_cursor_keeps_the_query_semantics(self):
+        self.assertEqual(
+            self.sql_result("SELECT g FROM generate_series(1, 5) AS g ORDER BY g DESC")["rows"],
+            [[5], [4], [3], [2], [1]],
+        )
+        self.assertEqual(self.sql_result("SELECT FROM generate_series(1, 3)")["rows"], [[], [], []])
+        result = self.sql_result("SELECT 1 AS a, 2 AS a, ROW(1, 'x') AS r; -- trailing comment")
+        self.assertEqual([column["name"] for column in result["columns"]], ["a", "a", "r"])
+        self.assertEqual(result["rows"], [[1, 2, "(1,x)"]])
+        # Positions refer to the query as sent, comments included.
+        error = self.sql_error("/* note */ SELECT nope", sqlstate="42703")
+        self.assertEqual(error["details"]["position"], 19)
 
     def test_timeouts(self):
         set_config(self.env, "o3p_mcp.api_timeout_seconds", 2)

@@ -1,5 +1,5 @@
 {
-  "source": "o3p_mcp branch 20.0 at 7023a99 on Odoo 20.0 (generated from the code, not edited by hand; data API and SQL parts by scripts/contract-20.sh)",
+  "source": "o3p_mcp branch 20.0 at ad1dc0b on Odoo 20.0 (generated from the code, not edited by hand; data API and SQL parts by scripts/contract-20.sh)",
   "data_api_errors": [
     {
       "code": "invalid_params",
@@ -76,6 +76,7 @@
   "introspection_inactive": "{\"active\": false}",
   "oauth_invalid_client": "{\"error\": \"invalid_client\", \"error_description\": \"Client authentication failed.\"}",
   "sql_messages": {
+    "MSG_ANSWER_TOO_LARGE": "The answer is too large; select fewer or smaller values, or ask for fewer rows.",
     "MSG_NOT_CONFIGURED": "SQL queries are not configured on this server.",
     "MSG_ONE_SELECT": "Only one SELECT statement is allowed (no INTO, FOR UPDATE or FOR SHARE).",
     "MSG_SANDBOX_BUSY": "All SQL sandbox connections are busy; try again shortly.",
