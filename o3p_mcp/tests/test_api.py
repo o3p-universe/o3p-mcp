@@ -139,7 +139,7 @@ class TestApiAuthentication(O3pMcpApiCase):
 @tagged("post_install", "-at_install")
 class TestApiModels(O3pMcpApiCase):
     def test_models_lists_readable_models_only(self):
-        result = self.result("models", {"query": "partner"})
+        result = self.result("models", {"query": "partner"})["models"]
         names = [item["model"] for item in result]
         self.assertIn("res.partner", names)
         self.assertEqual(
@@ -149,24 +149,48 @@ class TestApiModels(O3pMcpApiCase):
             self.assertEqual(set(item), {"model", "name"})
             self.assertTrue(self.env[item["model"]].with_user(self.restricted).has_access("read"))
         # A model only administrators may read.
-        self.assertEqual(self.result("models", {"query": "ir.cron"}), [])
-        admin = [item["model"] for item in self.result("models", {"query": "ir.cron"}, user="admin")]
+        self.assertEqual(self.result("models", {"query": "ir.cron"})["models"], [])
+        admin = [item["model"] for item in self.result("models", {"query": "ir.cron"}, user="admin")["models"]]
         self.assertIn("ir.cron", admin)
 
     def test_models_never_lists_hidden_transient_or_abstract_models(self):
         for query in ("ir.config_parameter", "o3p.mcp", "apikeys", "mail_server", "res.config"):
             with self.subTest(query=query):
-                names = [item["model"] for item in self.result("models", {"query": query}, user="admin")]
+                names = [item["model"] for item in self.result("models", {"query": query}, user="admin")["models"]]
                 self.assertFalse(
                     [name for name in names if name.startswith(("ir.config_parameter", "o3p.mcp", "res.users.apikeys", "ir.mail_server", "res.config"))],
                     names,
                 )
-        names = [item["model"] for item in self.result("models", {"query": "base"}, user="admin")]
+        names = [item["model"] for item in self.result("models", {"query": "base"}, user="admin")["models"]]
         self.assertNotIn("base", names)
 
+    def test_models_pages(self):
+        first = self.result("models", {"limit": 50}, user="admin")
+        self.assertEqual(set(first), {"models", "total", "truncated"})
+        self.assertGreater(first["total"], 50)
+        self.assertTrue(first["truncated"])
+        listed = [item["model"] for item in first["models"]]
+        offset = 50
+        while True:
+            page = self.result("models", {"limit": 50, "offset": offset}, user="admin")
+            self.assertEqual(page["total"], first["total"])
+            listed += [item["model"] for item in page["models"]]
+            offset += 50
+            if not page["truncated"]:
+                break
+        self.assertEqual(len(listed), first["total"])
+        self.assertEqual(len(set(listed)), len(listed))
+        self.assertEqual(listed, sorted(listed))
+        beyond = self.result("models", {"offset": first["total"]}, user="admin")
+        self.assertEqual((beyond["models"], beyond["truncated"]), ([], False))
+        query = self.result("models", {"query": "partner"}, user="admin")
+        self.assertEqual(query["total"], len(query["models"]))
+        self.assertFalse(query["truncated"])
+
     def test_models_parameters(self):
-        self.assertEqual(len(self.result("models", {"limit": 2}, user="admin")), 2)
-        for params in ({"limit": 51}, {"limit": 0}, {"limit": "5"}, {"query": 3}, {"query": "x" * 201}):
+        self.assertEqual(len(self.result("models", {"limit": 2}, user="admin")["models"]), 2)
+        for params in ({"limit": 51}, {"limit": 0}, {"limit": "5"}, {"query": 3}, {"query": "x" * 201},
+                       {"offset": -1}, {"offset": 10_001}):
             with self.subTest(params=params):
                 self.assertApiError(self.call("models", params), "invalid_params")
 

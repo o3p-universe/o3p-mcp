@@ -254,7 +254,7 @@ text.
 
 | Operation | Parameters | Result |
 |---|---|---|
-| `models` | `query` (optional, matched on the technical and the display name), `limit` (1–50, default 50) | `[{ "model", "name" }]`: the models the user may read |
+| `models` | `query` (optional, matched on the technical and the display name), `limit` (1–50, default 50), `offset` (optional, 0–10000) | `{ "models": [{ "model", "name" }], "total", "truncated" }`: the models the user may read, sorted by technical name; `total` counts all that match, `truncated` tells whether more follow |
 | `describe` | `model` | `{ "model", "name", "table", "fields": [{ "name", "string", "type", "relation"?, "required", "readonly", "stored", "searchable", "sortable", "groupable", "selection"?, "help"? }] }`: the fields the user may read; `table` is the database table or view of the model, `null` when it is computed from a query; `stored` tells whether the field has a column of its own (one2many and many2many have none), `searchable`, `sortable` and `groupable` whether domains, `order` and `groupby` accept it for this user |
 
 | `search` | `model`, `domain`, `fields`, `order`?, `limit` (1–200, default 80), `offset`? (0–1000000) | `{ "records", "count", "truncated" }` |
