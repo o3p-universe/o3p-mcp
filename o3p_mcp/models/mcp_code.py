@@ -1,6 +1,17 @@
 from odoo import api, fields, models
 
-from .oauth import CODE_LIFETIME, find_by_secret, hash_secret, new_secret, scope_string
+from .oauth import (
+    CODE_LIFETIME,
+    SCOPE_READ,
+    OAuthError,
+    find_by_secret,
+    hash_secret,
+    new_secret,
+    parse_scope,
+    pkce_matches,
+    same_resource,
+    scope_string,
+)
 
 
 class O3pMcpCode(models.Model):
@@ -77,3 +88,47 @@ class O3pMcpCode(models.Model):
         claimed = bool(self.env.cr.fetchone())
         self.invalidate_recordset(["used"])
         return claimed
+
+    @api.model
+    def _exchange(self, code, client, redirect_uri, code_verifier, resource=None):
+        """Exchange an authorization code for a token; return the response.
+
+        The code is consumed by the first exchange, successful or not. Using
+        it again revokes the tokens it was exchanged for.
+        """
+        record = self._find(code)
+        if not record or record.client_id != client:
+            raise OAuthError("invalid_grant", "The authorization code is not valid.")
+        if record.used or not record._claim():
+            if record.family:
+                self.env["o3p.mcp.token"].sudo().search(
+                    [("family", "=", record.family)], limit=1
+                )._revoke_family()
+            raise OAuthError("invalid_grant", "The authorization code was already used.")
+        if record.expires_at <= fields.Datetime.now():
+            raise OAuthError("invalid_grant", "The authorization code has expired.")
+        if redirect_uri:
+            same_redirect = redirect_uri == record.redirect_uri
+        else:
+            # Allowed only where the authorization request could omit it too.
+            same_redirect = client.redirect_uris == [record.redirect_uri]
+        if not same_redirect:
+            raise OAuthError(
+                "invalid_grant", "The redirect URI does not match the authorization."
+            )
+        if not pkce_matches(code_verifier, record.code_challenge):
+            raise OAuthError("invalid_grant", "The code verifier does not match.")
+        if resource and not same_resource(resource, record.resource):
+            raise OAuthError("invalid_target", "The resource does not match.")
+        scopes = parse_scope(record.scope) & self.env["o3p.mcp.oauth"]._scopes_for_user(
+            record.user_id
+        )
+        if SCOPE_READ not in scopes:
+            raise OAuthError(
+                "invalid_grant", "The user may no longer use the MCP server."
+            )
+        token, response = self.env["o3p.mcp.token"]._issue(
+            client, record.user_id, scopes, record.resource
+        )
+        record.family = token.family
+        return response

@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import hmac
 import re
@@ -27,6 +28,7 @@ REGISTER_PATH = "/o3p_mcp/oauth/register"
 
 # An S256 code challenge is a base64url SHA-256 digest without padding.
 CODE_CHALLENGE_RE = re.compile(r"[A-Za-z0-9_-]{43}")
+CODE_VERIFIER_RE = re.compile(r"[A-Za-z0-9._~-]{43,128}")
 
 CODE_LIFETIME = timedelta(minutes=5)
 DEFAULT_ACCESS_TOKEN_MINUTES = 60
@@ -67,6 +69,15 @@ def secret_matches(value, digest):
     ):
         return False
     return hmac.compare_digest(hash_secret(value), digest)
+
+
+def pkce_matches(verifier, challenge):
+    """Check an RFC 7636 ``S256`` code verifier against its challenge."""
+    if not isinstance(verifier, str) or not CODE_VERIFIER_RE.fullmatch(verifier):
+        return False
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    computed = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    return hmac.compare_digest(computed, challenge or "")
 
 
 def find_by_secret(model, field, value):

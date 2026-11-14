@@ -1,4 +1,6 @@
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+import base64
+import binascii
+from urllib.parse import parse_qsl, unquote_plus, urlencode, urlsplit, urlunsplit
 
 from odoo import http
 from odoo.http import request
@@ -7,8 +9,10 @@ from ..models.oauth import (
     AUTHORIZE_PATH,
     METADATA_PATH,
     REGISTER_PATH,
+    TOKEN_PATH,
     AuthorizationError,
     OAuthError,
+    parse_scope,
 )
 
 
@@ -43,7 +47,42 @@ def error_response(error):
     headers = []
     if error.status == 429:
         headers.append(("Retry-After", "3600"))
+    if error.status == 401 and request.httprequest.headers.get("Authorization"):
+        headers.append(("WWW-Authenticate", 'Basic realm="o3p_mcp"'))
     return json_response(error.to_dict(), status=error.status, headers=headers)
+
+
+def client_credentials():
+    """Return ``(client_id, secret, method)`` presented with the request.
+
+    Credentials come from HTTP Basic (``client_secret_basic``), from the
+    form body (``client_secret_post``) or, for public clients, as a bare
+    ``client_id`` (``none``). Mixing Basic with body credentials is refused.
+    """
+    form = request.httprequest.form
+    header = request.httprequest.headers.get("Authorization")
+    if header:
+        scheme, _space, value = header.partition(" ")
+        try:
+            if scheme.lower() != "basic":
+                raise ValueError("not basic")
+            decoded = base64.b64decode(value.strip(), validate=True).decode()
+            client_id, colon, secret = decoded.partition(":")
+            if not colon:
+                raise ValueError("no secret")
+        except (ValueError, binascii.Error) as exc:
+            raise OAuthError(
+                "invalid_client", "Client authentication failed.", status=401
+            ) from exc
+        client_id, secret = unquote_plus(client_id), unquote_plus(secret)
+        if "client_secret" in form or form.get("client_id", client_id) != client_id:
+            raise OAuthError(
+                "invalid_request", "Use one client authentication method only."
+            )
+        return client_id, secret, "client_secret_basic"
+    if "client_secret" in form:
+        return form.get("client_id"), form["client_secret"], "client_secret_post"
+    return form.get("client_id"), None, "none"
 
 
 def with_query(uri, params):
@@ -125,6 +164,52 @@ class O3pMcpOauthController(http.Controller):
         except OAuthError as error:
             return error_response(error)
         return json_response(response, status=201)
+
+    @http.route(
+        TOKEN_PATH,
+        type="http",
+        auth="none",
+        methods=["POST"],
+        csrf=False,
+        cors="*",
+        readonly=False,
+        save_session=False,
+    )
+    def token(self, **_params):
+        # Parameters are read from the form body only, never the query string.
+        form = request.httprequest.form
+        try:
+            client_id, secret, method = client_credentials()
+            client = request.env["o3p.mcp.client"]._authenticate(
+                client_id, secret, method
+            )
+            grant_type = form.get("grant_type")
+            if grant_type == "authorization_code":
+                response = request.env["o3p.mcp.code"]._exchange(
+                    form.get("code"),
+                    client,
+                    form.get("redirect_uri"),
+                    form.get("code_verifier"),
+                    form.get("resource"),
+                )
+            elif grant_type == "refresh_token":
+                scope = form.get("scope")
+                _token, response = request.env["o3p.mcp.token"]._rotate(
+                    form.get("refresh_token"),
+                    client,
+                    scopes=parse_scope(scope) if scope else None,
+                    resource=form.get("resource"),
+                )
+            elif not grant_type:
+                raise OAuthError("invalid_request", "grant_type is required.")
+            else:
+                raise OAuthError(
+                    "unsupported_grant_type",
+                    "Supported grant types: authorization_code, refresh_token.",
+                )
+        except OAuthError as error:
+            return error_response(error)
+        return json_response(response)
 
     @http.route(AUTHORIZE_PATH, type="http", auth="user", methods=["GET"])
     def authorize(self, **params):

@@ -10,6 +10,7 @@ from .oauth import (
     hash_secret,
     new_secret,
     parse_scope,
+    same_resource,
     scope_string,
 )
 
@@ -160,7 +161,7 @@ class O3pMcpToken(models.Model):
             raise OAuthError(
                 "invalid_scope", "The scope exceeds the original grant."
             )
-        if resource is not None and resource != token.resource:
+        if resource and not same_resource(resource, token.resource):
             raise OAuthError("invalid_target", "The resource does not match.")
         if not token._claim_refresh():
             token._revoke_family()

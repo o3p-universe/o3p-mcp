@@ -45,8 +45,9 @@ All URLs are relative to `web.base.url`, which is also the issuer.
 | `GET /.well-known/oauth-authorization-server` | Authorization server metadata (RFC 8414) |
 | `POST /o3p_mcp/oauth/register` | Dynamic client registration (RFC 7591) |
 | `GET`, `POST /o3p_mcp/oauth/authorize` | Sign-in and consent (authorization code with PKCE) |
+| `POST /o3p_mcp/oauth/token` | Token endpoint (authorization code and refresh token grants) |
 
-The metadata and registration endpoints answer cross-origin requests
+The metadata, registration and token endpoints answer cross-origin requests
 (`Access-Control-Allow-Origin: *`) and never create a session.
 
 ### Client registration
@@ -96,6 +97,30 @@ form back with Odoo's CSRF token and redirects to the client with `code`,
 `state` and `iss` (RFC 9207); denying redirects with `error=access_denied`.
 Other request errors are redirected to the client with `error`,
 `error_description`, `state` and `iss`.
+
+### Token endpoint
+
+`POST /o3p_mcp/oauth/token` takes a form-encoded body. Clients authenticate
+with the method they registered: `client_id` alone for public clients,
+`client_id` and `client_secret` in the body for `client_secret_post`, HTTP
+Basic for `client_secret_basic`. Mixing Basic with body credentials is
+refused. Responses carry `Cache-Control: no-store`.
+
+- `grant_type=authorization_code` with `code`, `code_verifier`,
+  `redirect_uri` (exactly the one used at authorization; it may be omitted
+  only when the client has a single redirect URI) and optionally `resource`.
+  A code is consumed by its first exchange, successful or not; presenting it
+  again revokes the tokens it was exchanged for.
+- `grant_type=refresh_token` with `refresh_token` and optionally `scope`
+  (a subset of the original grant) and `resource`. The user must still be
+  active and in the MCP groups: losing the Editor group narrows the new
+  token to `okf.read`, losing the User group refuses the refresh and revokes
+  the family.
+
+The response is `access_token`, `token_type` (`Bearer`), `expires_in`,
+`refresh_token` and `scope`. Errors follow RFC 6749 (`invalid_client` with
+HTTP 401, `invalid_grant`, `invalid_scope`, `invalid_target`,
+`unsupported_grant_type`).
 
 ## Installation
 
