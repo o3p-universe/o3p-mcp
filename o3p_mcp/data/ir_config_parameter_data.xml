@@ -8,4 +8,6 @@
         <field name="key">o3p_mcp.refresh_token_days</field>
         <field name="value">30</field>
     </record>
+    <!-- The issuer starts as the current web.base.url, then stays put. -->
+    <function model="o3p.mcp.oauth" name="_init_issuer"/>
 </odoo>

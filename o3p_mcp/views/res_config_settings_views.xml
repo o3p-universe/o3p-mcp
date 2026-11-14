@@ -26,12 +26,10 @@
                         </setting>
                         <setting id="o3p_mcp_authorization_server"
                                  string="Authorization server"
-                                 help="Odoo's own URLs, to configure the MCP server with.">
-                            <div class="content-group">
-                                <div class="row">
-                                    <label for="o3p_mcp_issuer" class="col-lg-4 o_light_label"/>
-                                    <field name="o3p_mcp_issuer" readonly="1"/>
-                                </div>
+                                 help="Public URL of this Odoo for MCP clients (https; http only on localhost). It does not follow web.base.url.">
+                            <field name="o3p_mcp_issuer"
+                                   placeholder="https://odoo.example.com"/>
+                            <div class="content-group mt-2">
                                 <div class="row">
                                     <label for="o3p_mcp_metadata_url" class="col-lg-4 o_light_label"/>
                                     <field name="o3p_mcp_metadata_url" readonly="1"/>

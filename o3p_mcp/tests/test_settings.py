@@ -56,6 +56,42 @@ class TestSettings(O3pMcpCommon, TransactionCase):
             f"{issuer}/.well-known/oauth-authorization-server",
         )
 
+    def test_issuer(self):
+        params = self.env["ir.config_parameter"]
+        oauth = self.env["o3p.mcp.oauth"]
+        # Initialised from web.base.url at install.
+        self.assertTrue(params.get_str("o3p_mcp.issuer"))
+        params.set_str("o3p_mcp.issuer", "https://odoo.example.com")
+        params.set_str("web.base.url", "https://elsewhere.example.com")
+        oauth._init_issuer()
+        self.assertEqual(oauth._issuer(), "https://odoo.example.com")
+        params.set_str("o3p_mcp.issuer", "")
+        oauth._init_issuer()
+        self.assertEqual(oauth._issuer(), "https://elsewhere.example.com")
+        for issuer in (
+            "http://odoo.example.com",
+            "https://odoo.example.com/odoo",
+            "https://odoo.example.com?x=1",
+            "https://user@odoo.example.com",
+            "ftp://odoo.example.com",
+            "odoo.example.com",
+            "",
+        ):
+            with self.subTest(issuer=issuer), self.assertRaises(UserError):
+                self.env["res.config.settings"].create({"o3p_mcp_issuer": issuer}).execute()
+        for issuer, stored in (
+            ("https://odoo.example.com/", "https://odoo.example.com"),
+            ("http://localhost:8069", "http://localhost:8069"),
+            ("https://odoo.example.com:8443", "https://odoo.example.com:8443"),
+        ):
+            self.env["res.config.settings"].create({"o3p_mcp_issuer": issuer}).execute()
+            self.assertEqual(params.get_str("o3p_mcp.issuer"), stored)
+        # An inherited value that would be refused does not block other settings.
+        params.set_str("o3p_mcp.issuer", "http://odoo.example.com")
+        self.env["res.config.settings"].create({"o3p_mcp_access_token_minutes": 30}).execute()
+        self.assertEqual(params.get_int("o3p_mcp.access_token_minutes"), 30)
+        self.assertEqual(oauth._issuer(), "http://odoo.example.com")
+
     def test_invalid_values_are_refused(self):
         for values in (
             {"o3p_mcp_resource_url": "ftp://mcp.example.com/mcp"},

@@ -10,6 +10,7 @@ from .oauth import (
     DEFAULT_REFRESH_TOKEN_DAYS,
     INTROSPECT_PATH,
     METADATA_PATH,
+    is_valid_issuer,
 )
 
 
@@ -71,8 +72,9 @@ class ResConfigSettings(models.TransientModel):
         default=DEFAULT_REFRESH_TOKEN_DAYS,
     )
     o3p_mcp_issuer = fields.Char(
-        string="Authorization server",
-        compute="_compute_o3p_mcp_urls",
+        string="Issuer",
+        help="Public URL of this Odoo as the authorization server, such as "
+        "https://odoo.example.com. Metadata, endpoints and iss use it.",
     )
     o3p_mcp_metadata_url = fields.Char(
         string="Metadata URL",
@@ -92,7 +94,6 @@ class ResConfigSettings(models.TransientModel):
         issuer = self.env["o3p.mcp.oauth"]._issuer()
         server = self.env["o3p.mcp.client"].sudo()._resource_server()
         for settings in self:
-            settings.o3p_mcp_issuer = issuer
             settings.o3p_mcp_metadata_url = f"{issuer}{METADATA_PATH}"
             settings.o3p_mcp_introspection_url = f"{issuer}{INTROSPECT_PATH}"
             settings.o3p_mcp_resource_server_client_id = server.client_id
@@ -102,6 +103,7 @@ class ResConfigSettings(models.TransientModel):
         values = super().get_values()
         params = self.env["ir.config_parameter"].sudo()
         values.update(
+            o3p_mcp_issuer=self.env["o3p.mcp.oauth"]._issuer(),
             o3p_mcp_resource_url=params.get_str("o3p_mcp.resource_url", ""),
             o3p_mcp_access_token_minutes=params.get_int(
                 "o3p_mcp.access_token_minutes", DEFAULT_ACCESS_TOKEN_MINUTES
@@ -113,6 +115,16 @@ class ResConfigSettings(models.TransientModel):
         return values
 
     def set_values(self):
+        issuer = (self.o3p_mcp_issuer or "").strip().rstrip("/")
+        # Checked only when changed, so that an issuer inherited from
+        # web.base.url at install does not block unrelated settings.
+        if issuer != self.env["o3p.mcp.oauth"]._issuer() and not is_valid_issuer(issuer):
+            raise UserError(
+                self.env._(
+                    "The issuer must be an https URL without path, such as "
+                    "https://odoo.example.com (http only on localhost)."
+                )
+            )
         resource_url = (self.o3p_mcp_resource_url or "").strip()
         if resource_url and not is_valid_resource_url(resource_url):
             raise UserError(
@@ -137,6 +149,7 @@ class ResConfigSettings(models.TransientModel):
             )
         result = super().set_values()
         params = self.env["ir.config_parameter"].sudo()
+        params.set_str("o3p_mcp.issuer", issuer)
         params.set_str("o3p_mcp.resource_url", resource_url)
         params.set_int("o3p_mcp.access_token_minutes", self.o3p_mcp_access_token_minutes)
         params.set_int("o3p_mcp.refresh_token_days", self.o3p_mcp_refresh_token_days)

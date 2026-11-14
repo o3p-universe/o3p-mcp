@@ -38,7 +38,7 @@ scope.
 
 ## Endpoints
 
-All URLs are relative to `web.base.url`, which is also the issuer.
+All URLs are relative to the issuer (see Settings).
 
 | Method and path | Purpose |
 |---|---|
@@ -168,12 +168,16 @@ values under `o3p_mcp.*`:
 
 | Setting | Parameter | Default |
 |---|---|---|
+| Issuer: public URL of this Odoo as authorization server, https (http only on localhost), no path | `o3p_mcp.issuer` | `web.base.url` at install |
 | MCP server URL: the public MCP endpoint, the only resource and token audience | `o3p_mcp.resource_url` | empty |
 | Access token lifetime, 1 to 1440 minutes | `o3p_mcp.access_token_minutes` | 60 |
 | Refresh token lifetime, 1 to 365 days, counted from each refresh | `o3p_mcp.refresh_token_days` | 30 |
 
-The section also shows the issuer, the metadata URL and the introspection
-URL, and offers two buttons:
+The issuer is used for the metadata, the endpoint URLs and the `iss`
+parameter. It does not follow `web.base.url`, which Odoo rewrites whenever
+an administrator signs in (unless `web.base.url.freeze` is set), so clients
+always see the same authorization server. The section also shows the
+metadata URL and the introspection URL, and offers two buttons:
 
 - **Create or rotate credentials** creates the resource-server client the MCP
   server introspects with, or gives it a new secret. The client ID and secret
@@ -203,8 +207,8 @@ at once in Odoo (the MCP server may cache an answer for up to a minute).
 
 1. Install the addon and give users the **MCP / User** or **MCP / Editor**
    group.
-2. In **Settings › MCP**, enter the MCP server URL and create the
-   introspection credentials.
+2. In **Settings › MCP**, check the issuer, enter the MCP server URL and
+   create the introspection credentials.
 3. Configure the MCP server with Odoo as its authorization server: the
    issuer shown in the settings, the introspection URL, the introspection
    client ID and secret, and a public URL equal to the MCP server URL. With
@@ -223,9 +227,10 @@ at once in Odoo (the MCP server may cache an answer for up to a minute).
 
 ## Deployment notes
 
-- The issuer is `web.base.url`. Behind a reverse proxy, run Odoo with
-  `proxy_mode` so that `web.base.url` is the public URL and the registration
-  limit counts the clients' addresses rather than the proxy's.
+- The issuer starts as `web.base.url` when the addon is installed; set it
+  to the public URL in the settings if that differs.
+- Behind a reverse proxy, run Odoo with `proxy_mode` so that the
+  registration limit counts the clients' addresses rather than the proxy's.
 - The metadata, registration, token, introspection and revocation endpoints
   run without a session, so Odoo must pick the database from the request
   alone: serve a single database or set `dbfilter` so the host name selects

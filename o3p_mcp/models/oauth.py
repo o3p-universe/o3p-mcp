@@ -166,6 +166,29 @@ def is_allowed_redirect_uri(uri):
     return bool(SCHEME_RE.fullmatch(scheme)) and scheme not in REJECTED_SCHEMES
 
 
+def is_valid_issuer(value):
+    """Tell whether ``value`` may be the issuer: an https origin, or http on a
+    loopback host, without path, query, fragment or user information."""
+    if not isinstance(value, str) or "\\" in value:
+        return False
+    try:
+        parts = urlsplit(value)
+        parts.port  # noqa: B018 - raises ValueError on an invalid port
+    except ValueError:
+        return False
+    if (
+        parts.path not in ("", "/")
+        or parts.query
+        or parts.fragment
+        or "@" in parts.netloc
+        or not normalized_host(parts.hostname)
+    ):
+        return False
+    return parts.scheme == "https" or (
+        parts.scheme == "http" and parts.hostname in LOOPBACK_HOSTS
+    )
+
+
 def display_target(uri):
     """Return where ``uri`` leads, as shown to the user.
 
@@ -359,9 +382,23 @@ class O3pMcpOauth(models.AbstractModel):
 
     @api.model
     def _issuer(self):
-        """Return the issuer: ``web.base.url`` without a trailing slash."""
-        base_url = self.env["ir.config_parameter"].sudo().get_str("web.base.url")
-        return (base_url or "").rstrip("/")
+        """Return the issuer, without a trailing slash.
+
+        It is the ``o3p_mcp.issuer`` setting, not ``web.base.url``: Odoo
+        rewrites ``web.base.url`` whenever an administrator signs in, which
+        would change the issuer, the endpoints and ``iss`` under the clients.
+        """
+        params = self.env["ir.config_parameter"].sudo()
+        issuer = params.get_str("o3p_mcp.issuer") or params.get_str("web.base.url")
+        return (issuer or "").strip().rstrip("/")
+
+    @api.model
+    def _init_issuer(self):
+        """Initialise the issuer from ``web.base.url`` unless already set."""
+        params = self.env["ir.config_parameter"].sudo()
+        if not params.get_str("o3p_mcp.issuer"):
+            base_url = params.get_str("web.base.url") or ""
+            params.set_str("o3p_mcp.issuer", base_url.strip().rstrip("/"))
 
     @api.model
     def _metadata(self):

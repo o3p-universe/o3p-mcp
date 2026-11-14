@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 
 from odoo.tests import HttpCase, TransactionCase, tagged
 
@@ -87,7 +88,7 @@ class TestMetadataAndRegistration(HttpCase):
 
     def test_metadata(self):
         self.env["ir.config_parameter"].sudo().set_str(
-            "web.base.url", "https://odoo.example.com/"
+            "o3p_mcp.issuer", "https://odoo.example.com/"
         )
         response = self.url_open(METADATA_URL)
         self.assertEqual(response.status_code, 200)
@@ -123,6 +124,26 @@ class TestMetadataAndRegistration(HttpCase):
                 "authorization_response_iss_parameter_supported": True,
             },
         )
+
+    def test_admin_login_does_not_move_the_issuer(self):
+        # Review probe: Odoo rewrites web.base.url when an administrator signs
+        # in on another host; the issuer must not follow it.
+        params = self.env["ir.config_parameter"].sudo()
+        params.set_str("web.base.url", "https://odoo.example.com")
+        params.set_str("o3p_mcp.issuer", "https://odoo.example.com")
+        before = self.url_open(METADATA_URL).json()
+        page = self.url_open("/web/login")
+        csrf = re.search(r'name="csrf_token" value="([^"]+)"', page.text).group(1)
+        login = self.url_open(
+            "/web/login",
+            data={"login": "admin", "password": "admin", "csrf_token": csrf},
+            allow_redirects=False,
+        )
+        self.assertEqual(login.status_code, 303)
+        self.assertNotEqual(params.get_str("web.base.url"), "https://odoo.example.com")
+        after = self.url_open(METADATA_URL).json()
+        self.assertEqual(after, before)
+        self.assertEqual(after["issuer"], "https://odoo.example.com")
 
     def test_cors_preflight(self):
         for url in (METADATA_URL, REGISTER_URL):
