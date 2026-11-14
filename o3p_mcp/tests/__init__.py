@@ -7,3 +7,4 @@ from . import test_introspect
 from . import test_settings
 from . import test_api
 from . import test_contract
+from . import test_denylist

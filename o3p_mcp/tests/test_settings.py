@@ -6,6 +6,7 @@ import requests
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tests import Form, TransactionCase, new_test_user, tagged
 
+from ..models.denylist import DEFAULT_DENIED_FIELDS
 from ..models.oauth import OAuthError, get_config, get_config_int, set_config
 from ..models.res_config_settings import health_url
 from .common import RESOURCE, O3pMcpCommon
@@ -182,8 +183,12 @@ class TestSettings(O3pMcpCommon, TransactionCase):
         self.assertEqual(
             get_config(params.env, "o3p_mcp.api_denied_models"), "o3p.mcp.*\nir.config_parameter\nres.bank"
         )
-        # An empty list restores the default.
-        self.assertIn("*password*", get_config(params.env, "o3p_mcp.api_denied_fields"))
+        # An empty list, like the default list, is not stored: the defaults of
+        # later versions then apply.
+        self.assertEqual(get_config(params.env, "o3p_mcp.api_denied_fields"), "")
+        self.assertEqual(self.env["o3p.mcp.api"]._denied_field_patterns(), DEFAULT_DENIED_FIELDS)
+        self.env["res.config.settings"].create({}).execute()
+        self.assertEqual(get_config(params.env, "o3p_mcp.api_denied_fields"), "")
         self.assertEqual(get_config_int(params.env, "o3p_mcp.api_max_response_bytes"), 50_000)
         self.assertEqual(get_config_int(params.env, "o3p_mcp.api_timeout_seconds"), 5)
         self.assertEqual(get_config_int(params.env, "o3p_mcp.api_log_days"), 7)

@@ -5,14 +5,8 @@ import requests
 from odoo import api, fields, models
 from odoo.exceptions import UserError
 
-from .api import (
-    DEFAULT_DENIED_FIELDS,
-    DEFAULT_DENIED_MODELS,
-    DEFAULT_LOG_DAYS,
-    DEFAULT_MAX_RESPONSE_BYTES,
-    DEFAULT_TIMEOUT_SECONDS,
-    patterns,
-)
+from .api import DEFAULT_LOG_DAYS, DEFAULT_MAX_RESPONSE_BYTES, DEFAULT_TIMEOUT_SECONDS
+from .denylist import DEFAULT_DENIED_FIELDS, DEFAULT_DENIED_MODELS, patterns
 from .mcp_client import DEFAULT_REGISTRATION_LIMIT, MAX_REGISTRATION_LIMIT
 from .oauth import (
     DEFAULT_ACCESS_TOKEN_MINUTES,
@@ -220,14 +214,14 @@ class ResConfigSettings(models.TransientModel):
         if not 1 <= self.o3p_mcp_api_log_days <= 3650:
             raise UserError(self.env._("The call log must be kept between 1 and 3650 days."))
         result = super().set_values()
-        set_config(self.env,
-            "o3p_mcp.api_denied_models",
-            "\n".join(patterns(self.o3p_mcp_api_denied_models, DEFAULT_DENIED_MODELS)),
-        )
-        set_config(self.env,
-            "o3p_mcp.api_denied_fields",
-            "\n".join(patterns(self.o3p_mcp_api_denied_fields, DEFAULT_DENIED_FIELDS)),
-        )
+        # The default lists are not stored, so that a later version's
+        # additions to them apply.
+        for key, value, default in (
+            ("o3p_mcp.api_denied_models", self.o3p_mcp_api_denied_models, DEFAULT_DENIED_MODELS),
+            ("o3p_mcp.api_denied_fields", self.o3p_mcp_api_denied_fields, DEFAULT_DENIED_FIELDS),
+        ):
+            items = patterns(value, default)
+            set_config(self.env, key, "" if items == tuple(default) else "\n".join(items))
         set_config(self.env, "o3p_mcp.api_max_response_bytes", self.o3p_mcp_api_max_response_kb * 1000)
         set_config(self.env, "o3p_mcp.api_timeout_seconds", self.o3p_mcp_api_timeout_seconds)
         set_config(self.env, "o3p_mcp.api_log_days", self.o3p_mcp_api_log_days)
