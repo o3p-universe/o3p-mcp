@@ -1,4 +1,3 @@
-import fnmatch
 import logging
 import re
 
@@ -9,21 +8,18 @@ from odoo import api, fields, models
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.fields import Domain
 
+from .denylist import (  # noqa: F401 - re-exported for callers of this module
+    DEFAULT_DENIED_FIELDS,
+    DEFAULT_DENIED_MODELS,
+    field_denied,
+    model_denied,
+    patterns,
+)
 from .oauth import SCOPE_ODOO_READ, SCOPE_READ, find_by_secret, parse_scope, same_resource
 
 
 _logger = logging.getLogger(__name__)
 
-DEFAULT_DENIED_MODELS = (
-    "ir.config_parameter",
-    "res.users.apikeys*",
-    "o3p.mcp.*",
-    "auth_totp*",
-    "ir.mail_server",
-    "fetchmail.server",
-    "payment.provider",
-)
-DEFAULT_DENIED_FIELDS = ("*password*", "*secret*", "*token*", "*api_key*")
 DEFAULT_MAX_RESPONSE_BYTES = 1_000_000
 DEFAULT_TIMEOUT_SECONDS = 15
 DEFAULT_LOG_DAYS = 30
@@ -117,12 +113,6 @@ class ApiError(Exception):
 
     def to_dict(self):
         return {"error": {"code": self.code, "message": self.message}}
-
-
-def patterns(value, default):
-    """Return the fnmatch patterns of a setting: one per line or comma."""
-    items = [item.strip() for item in (value or "").replace(",", "\n").splitlines()]
-    return tuple(item for item in items if item) or default
 
 
 class O3pMcpApi(models.AbstractModel):
@@ -272,16 +262,14 @@ class O3pMcpApi(models.AbstractModel):
     # ------------------------------------------------------------------
 
     def _model_denied(self, name):
-        return any(fnmatch.fnmatchcase(name, pattern) for pattern in self._denied_model_patterns())
+        """Tell whether model ``name`` is hidden (see models/denylist.py)."""
+        return model_denied(name, self._denied_model_patterns())
 
     def _field_denied(self, field):
-        name = field.name.lower()
-        if field.type == "binary" or any(
-            fnmatch.fnmatchcase(name, pattern.lower())
-            for pattern in self._denied_field_patterns()
-        ):
-            return True
-        return bool(field.relational and self._model_denied(field.comodel_name))
+        """Tell whether ``field`` is hidden (see models/denylist.py)."""
+        return field_denied(
+            field, self._denied_field_patterns(), self._denied_model_patterns()
+        )
 
     def _exposed_model(self, name):
         """Tell whether model ``name`` may appear at all, whatever the user."""

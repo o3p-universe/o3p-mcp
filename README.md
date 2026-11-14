@@ -289,15 +289,33 @@ part, or a parameter the operation does not take, is refused with
 
 Some data is never exposed, whatever the user's rights, administrators
 included. The lists are settings (one pattern per line, `*` matches
-anything); an empty list restores the default.
+anything); an empty list, or the default list itself, is not stored, so the
+defaults of later versions apply.
 
-- Models, by default: `ir.config_parameter`, `res.users.apikeys*`,
-  `o3p.mcp.*`, `auth_totp*`, `ir.mail_server`, `fetchmail.server`,
-  `payment.provider`.
+- Models, by default:
+  - credentials and payment data: `ir.config_parameter`,
+    `res.users.apikeys*`, `o3p.mcp.*`, `auth_totp*`, `ir.mail_server`,
+    `fetchmail.server`, `payment.provider`, `payment.token` (saved-card
+    references), `payment.transaction` (provider references),
+    `mail.push.device*` (push subscription keys);
+  - models that point at other records by model name and id without
+    checking that the user may read those records: `mail.followers`,
+    `mail.notification`, `mail.tracking.value` (old and new field values),
+    `rating.rating`, `bus.*`.
 - Field names, on every model, by default: `*password*`, `*secret*`,
-  `*token*`, `*api_key*`.
+  `*token*`, `*api_key*`, `*shared_key*`, `provider_ref*`.
 - Always: binary fields (files and images), and relational fields that
   point to a hidden model.
+
+The defaults come from a review of a standard install (sale, purchase,
+stock, account, crm, hr, project, website, mrp, payment). Attachments,
+messages, activities and scheduled messages also point at records, but Odoo
+checks access to the linked record for them, so they stay readable. The
+addon's tests list every stored text field with a sensitive-looking name
+(`ref`, `token`, `key`, `secret`, `password`, IBAN or account number,
+`provider_…`) that is not hidden, with the reason it may be read, such as
+business references and SEO keywords; a new field of that kind fails the
+tests until it is hidden or reviewed.
 
 ### Call log
 
