@@ -338,6 +338,70 @@ class TestSqlVisibility(O3pMcpSqlCase):
         pairs = {tuple(row) for row in self.sql_result(relation)["rows"]}
         self.assertFalse({self.hidden.id, self.hidden2.id} & {partner for partner, _c in pairs})
 
+    def test_denied_models_and_their_relation_tables_never_answer(self):
+        params = self.env["ir.config_parameter"].sudo()
+        api = self.env["o3p.mcp.api"]
+        # On top of the defaults: a model with a many2many table and a model
+        # other tables point to.
+        params.set_str(
+            "o3p_mcp.api_denied_models",
+            "\n".join([*api._denied_model_patterns(), "res.partner.category", "res.country"]),
+        )
+        index = api._sql_table_index()
+        denied = [name for name in self.env.registry if api._model_denied(name)]
+        self.assertTrue({"ir.config_parameter", "res.partner.category", "res.country"} <= set(denied))
+        tables = {self.env[name]._table for name in denied if not self.env[name]._abstract}
+        tables |= {
+            table
+            for table, (kind, entries) in index.items()
+            if kind == "m2m"
+            and any(
+                api._model_denied(model) or api._model_denied(self.env[model]._fields[field].comodel_name)
+                for model, field in entries
+            )
+        }
+        for name in ("mail.followers", "payment.token"):
+            if name in self.env.registry:
+                tables.add(self.env[name]._table)
+        self.assertIn("res_partner_res_partner_category_rel", tables)
+        for table in sorted(tables):
+            for user in ("admin", "multi"):
+                with self.subTest(table=table, user=user):
+                    self.sql_error(f'SELECT * FROM "{table}"', user=user, sqlstate="42P01")
+        # Columns that point to a denied model are not copied either.
+        self.sql_error("SELECT country_id FROM res_partner", user="admin", sqlstate="42703")
+        self.assertEqual(self.sql_result("SELECT count(*) FROM res_partner WHERE id = 0", user="admin")["rows"], [[0]])
+
+    def test_joins_see_rows_readable_on_both_sides(self):
+        Partner = self.env["res.partner"]
+        parent = Partner.create({"name": "MCPT Parent", "is_company": True, "category_id": [(4, self.visible.id)]})
+        Partner.create({"name": "MCPT Visible Child", "parent_id": parent.id, "category_id": [(4, self.visible.id)]})
+        Partner.create({"name": "MCPT Hidden Child", "parent_id": parent.id})
+        shared = self.env["res.partner.category"].create({"name": "MCPT Shared"})
+        (self.alpha | self.hidden).category_id = [(4, shared.id)]
+        self.env.flush_all()
+        children = (
+            "SELECT p.name, count(c.id) FROM res_partner p LEFT JOIN res_partner c ON c.parent_id = p.id"
+            " WHERE p.name = 'MCPT Parent' GROUP BY p.name"
+        )
+        members = (
+            "SELECT count(r.partner_id), count(p.id) FROM res_partner_category c"
+            " JOIN res_partner_res_partner_category_rel r ON r.category_id = c.id"
+            " LEFT JOIN res_partner p ON p.id = r.partner_id WHERE c.name = 'MCPT Shared'"
+        )
+        for name in ("restricted", "admin"):
+            user = self.users[name]
+            with self.subTest(user=name):
+                # one2many: the ORM shows the children the user may read.
+                orm_children = len(parent.with_user(user).child_ids)
+                self.assertEqual(self.sql_result(children, user=name)["rows"], [["MCPT Parent", orm_children]])
+                # many2many: pairs exist only when both sides are readable.
+                orm_members = len(shared.with_user(user).partner_ids)
+                self.assertEqual(self.sql_result(members, user=name)["rows"], [[orm_members, orm_members]])
+        self.assertEqual(len(parent.with_user(self.restricted).child_ids), 1)
+        self.assertEqual(len(shared.with_user(self.restricted).partner_ids), 1)
+        self.assertEqual(len(shared.with_user(self.admin).partner_ids), 2)
+
     def test_rows_are_what_the_orm_returns(self):
         query = "SELECT id, active, company_id FROM res_partner ORDER BY id"
         for name, user in self.users.items():
