@@ -237,7 +237,8 @@ exception, PostgreSQL's answer to an SQL query, is described under SQL):
 | 503 | `unavailable` | SQL only: no sandbox is configured, or it cannot be reached |
 | 504 | `timeout` | The query exceeded the time limit |
 
-Validation errors also carry `details`, so a client can correct its call:
+Validation errors and `unknown_model` also carry `details`, so a client can
+correct its call:
 
 ```json
 { "error": { "code": "invalid_params", "message": "…",
@@ -245,12 +246,13 @@ Validation errors also carry `details`, so a client can correct its call:
                "hint": "Append :day, :week, :month, :quarter or :year to a date field (or :hour to a datetime field)." } } }
 ```
 
-`field` is the field path or parameter name the client sent, `model` (for
-`no_model_access`) a model name, `reason` one of `unknown_param`,
+`field` is the field path or parameter name the client sent, `model` the
+model concerned (for `unknown_model` and `no_model_access`, and the model a
+field reached through a path belongs to), `reason` one of `unknown_param`,
 `bad_value`, `bad_domain`, `too_deep`, `unknown_field`, `not_readable`,
 `not_filterable`, `not_searchable`, `not_sortable`, `not_groupable`,
 `not_relational`, `bypass_relation`, `no_relation_access`,
-`no_model_access`, `bad_operator`, `bad_order`, `bad_aggregate`,
+`no_model_access`, `unknown_model`, `bad_operator`, `bad_order`, `bad_aggregate`,
 `granularity_required` or `bad_granularity`, and `hint` a fixed sentence for
 that reason (for `hr.employee`: use `hr.employee.public`). Details contain
 schema names and fixed texts only, never record data or Odoo's own error

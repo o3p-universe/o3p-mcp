@@ -92,12 +92,18 @@ class TestContractParity(O3pMcpApiCase):
                     json.dumps(body, ensure_ascii=False, default=json_default),
                     self.expected(code)["body"],
                 )
+                # Validation errors add details (fixed texts compared above).
                 if code == "access_denied":
-                    # Validation errors add details (fixed texts compared above).
                     self.assertEqual(details, {
                         "model": "ir.cron",
                         "reason": "no_model_access",
                         "hint": CONTRACT["data_api_reasons"]["no_model_access"],
+                    })
+                elif code == "unknown_model":
+                    self.assertEqual(details, {
+                        "model": "no.such.model",
+                        "reason": "unknown_model",
+                        "hint": CONTRACT["data_api_reasons"]["unknown_model"],
                     })
                 else:
                     self.assertIsNone(details)

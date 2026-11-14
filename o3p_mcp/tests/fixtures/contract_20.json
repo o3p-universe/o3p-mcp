@@ -202,9 +202,10 @@
     "bypass_relation": "This relation ignores the related model's access rules: search the related model first, then filter on its record ids.",
     "no_relation_access": "The user may not read the model this relation points to.",
     "no_model_access": "The user may not read this model.",
+    "unknown_model": "Call the models operation (odoo_find_models) to list the models you may read.",
     "bad_operator": "Use =, !=, >, >=, <, <=, =?, in, not in, like, not like, ilike, not ilike, =like, =ilike, any or not any (child_of and parent_of are not available); on relations compare record ids, or match names with =, in, like or ilike.",
     "bad_order": "Use field, field asc or field desc items separated by commas.",
-    "bad_aggregate": "Use __count, field:sum|avg|min|max on numeric fields, or field:count|count_distinct on stored fields.",
+    "bad_aggregate": "Use __count, field:sum|avg|min|max on stored numeric fields, or field:count|count_distinct on stored fields.",
     "granularity_required": "Append :day, :week, :month, :quarter or :year to a date field (or :hour to a datetime field).",
     "bad_granularity": "Only date and datetime fields take a granularity: day, week, month, quarter or year, and hour for datetimes."
   },
@@ -212,5 +213,5 @@
     "hr.employee": "The user may not read hr.employee: use hr.employee.public, which every employee may read."
   },
   "data_api_details_example": "{\"error\": {\"code\": \"invalid_params\", \"message\": \"groupby is not valid: use groupable readable fields; date fields need a granularity (day, week, month, quarter, year, or hour for datetimes).\", \"details\": {\"field\": \"create_date\", \"reason\": \"granularity_required\", \"hint\": \"Append :day, :week, :month, :quarter or :year to a date field (or :hour to a datetime field).\"}}}",
-  "data_api_details_source": "o3p_mcp branch 20.0 at 6323bda (REASONS, MODEL_HINTS and the details example, generated from the code)"
+  "data_api_details_source": "o3p_mcp branch 20.0 at 9c5f7bc (REASONS, MODEL_HINTS and the details example, generated from the code)"
 }
