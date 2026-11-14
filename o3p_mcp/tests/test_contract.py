@@ -11,14 +11,17 @@ from unittest.mock import patch
 
 from psycopg2 import errors as pg_errors
 
+from odoo.sql_db import db_connect
 from odoo.tests import tagged
 from odoo.tools import json_default
 
 from ..models import api as api_module
+from ..models import api_sql
 from ..models.api import ERRORS, ApiError
-from ..models.oauth import set_config
+from ..models.oauth import get_config, set_config
 from .api_common import O3pMcpApiCase, basic
 from .common import RESOURCE
+from .sql_common import O3pMcpSqlCase
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -96,3 +99,48 @@ class TestContractParity(O3pMcpApiCase):
         refused = self.url_open(INTROSPECT_URL, data={"token": token}, headers={})
         self.assertEqual(refused.status_code, 401)
         self.assertEqual(refused.text, CONTRACT["oauth_invalid_client"])
+
+
+@tagged("post_install", "-at_install")
+class TestSqlContractParity(O3pMcpSqlCase):
+    """The sql operation answers on Odoo 18 with the 20.0 branch's bytes.
+
+    The cases and the answers come from the fixture (scripts/contract-20.sh
+    replays them on the 20.0 code); only ``elapsedMs`` may differ.
+    """
+
+    def test_sql_messages_match_20(self):
+        messages = {name: getattr(api_sql, name) for name in sorted(dir(api_sql)) if name.startswith("MSG_")}
+        self.assertEqual(messages, CONTRACT["sql_messages"])
+
+    def test_sql_answers_match_20(self):
+        for name, case in CONTRACT["sql_answers"].items():
+            with self.subTest(case=name):
+                holder = None
+                if case["setting"]:
+                    key, value = case["setting"]
+                    previous = get_config(self.env, key)
+                    set_config(self.env, key, value)
+                if name == "too_many_requests":
+                    holder = db_connect(self.env.cr.dbname).cursor()
+                    base = (self.restricted.id % 2**24) * api_sql.MAX_USER_SLOTS
+                    for slot in range(api_sql.DEFAULT_SQL_USER_CONCURRENCY):
+                        holder.execute(
+                            "SELECT pg_try_advisory_xact_lock(%s, %s)", [api_sql.LOCK_USER_SLOT, base + slot]
+                        )
+                try:
+                    raw = json.dumps({"token": self.sql_tokens["restricted"], "params": case["params"]})
+                    response = self.call("sql", raw=raw)
+                finally:
+                    if holder is not None:
+                        holder.rollback()
+                        holder.close()
+                    if case["setting"]:
+                        set_config(self.env, key, previous)
+                self.assertEqual(response.status_code, case["status"])
+                text = response.text
+                if response.status_code == 200:
+                    body = response.json()
+                    body["result"]["elapsedMs"] = 0
+                    text = json.dumps(body, ensure_ascii=False, default=json_default)
+                self.assertEqual(text, case["body"])
