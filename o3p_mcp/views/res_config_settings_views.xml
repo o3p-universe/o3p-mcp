@@ -103,6 +103,11 @@
                                  help="Lifetime of a refresh token, in days (1 to 365), counted from each refresh.">
                             <field name="o3p_mcp_refresh_token_days"/>
                         </setting>
+                        <setting id="o3p_mcp_registration_limit"
+                                 string="Client registrations"
+                                 help="Clients that may register per hour from one address (IPv6: one /64 network), 1 to 100000. Hosted connectors register all their users from a few shared addresses, so keep it well above the number of people who connect in an hour.">
+                            <field name="o3p_mcp_registration_limit"/>
+                        </setting>
                         <setting id="o3p_mcp_management"
                                  string="Clients and tokens"
                                  help="Registered MCP clients and the tokens issued to them.">

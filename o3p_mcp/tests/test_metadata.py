@@ -2,6 +2,7 @@ import hashlib
 import json
 import re
 
+from odoo.exceptions import UserError
 from odoo.tests import HttpCase, TransactionCase, tagged
 
 from ..models.mcp_client import address_bucket
@@ -324,6 +325,7 @@ class TestMetadataAndRegistration(HttpCase):
         )
 
     def test_rate_limit(self):
+        self.env["ir.config_parameter"].sudo().set_int("o3p_mcp.registration_limit", 20)
         Client = self.env["o3p.mcp.client"]
         payload = {
             "redirect_uris": ["http://127.0.0.1:9999/callback"],
@@ -339,7 +341,28 @@ class TestMetadataAndRegistration(HttpCase):
         # Other addresses are counted separately.
         self.assertIn("client_id", Client._register_client(payload, "203.0.113.7"))
 
+    def test_rate_limit_setting(self):
+        Client = self.env["o3p.mcp.client"]
+        self.assertEqual(Client._registration_limit(), 200)
+        self.assertEqual(self.env["res.config.settings"].create({}).o3p_mcp_registration_limit, 200)
+        self.env["res.config.settings"].create({"o3p_mcp_registration_limit": 3}).execute()
+        self.assertEqual(Client._registration_limit(), 3)
+        payload = {
+            "redirect_uris": ["http://127.0.0.1:9999/callback"],
+            "token_endpoint_auth_method": "none",
+        }
+        for _index in range(2):
+            Client._register_client(payload, "127.0.0.1")
+        self.assertEqual(self.register(payload).status_code, 201)
+        self.assertEqual(self.register(payload).status_code, 429)
+        for value in (0, 100_001):
+            with self.subTest(value=value), self.assertRaises(UserError):
+                self.env["res.config.settings"].create(
+                    {"o3p_mcp_registration_limit": value}
+                ).execute()
+
     def test_rate_limit_counts_ipv6_per_64(self):
+        self.env["ir.config_parameter"].sudo().set_int("o3p_mcp.registration_limit", 20)
         Client = self.env["o3p.mcp.client"]
         payload = {
             "redirect_uris": ["http://127.0.0.1:9999/callback"],
