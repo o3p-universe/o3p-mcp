@@ -26,6 +26,7 @@ DEFAULT_DENIED_MODELS = (
     "mail.tracking.value",
     "mail.push.device*",
     "rating.rating",
+    "snailmail.letter",
     "bus.*",
 )
 # Field names hidden on every model. Binary fields, and relational fields to

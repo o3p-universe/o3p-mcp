@@ -312,7 +312,8 @@ defaults of later versions apply.
   - models that point at other records by model name and id without
     checking that the user may read those records: `mail.followers`,
     `mail.notification`, `mail.tracking.value` (old and new field values),
-    `rating.rating`, `bus.*`.
+    `rating.rating`, `snailmail.letter` (postal letters with the
+    recipient's address), `bus.*`.
 - Field names, on every model, by default: `*password*`, `*secret*`,
   `*token*`, `*api_key*`, `*shared_key*`, `provider_ref*`.
 - Always: binary fields (files and images), and relational fields that
