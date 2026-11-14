@@ -9,3 +9,4 @@ from . import test_api
 from . import test_denylist
 from . import test_sql
 from . import test_sql_scope
+from . import test_sql_attacks
