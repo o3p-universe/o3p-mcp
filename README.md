@@ -223,7 +223,29 @@ never contains an exception text, a parameter or record data:
 | `models` | `query` (optional, matched on the technical and the display name), `limit` (1–50, default 50) | `[{ "model", "name" }]`: the models the user may read |
 | `describe` | `model` | `{ "model", "name", "fields": [{ "name", "string", "type", "relation"?, "required", "readonly", "selection"?, "help"? }] }`: the fields the user may read |
 
-`models` never lists transient, abstract or hidden models.
+| `search` | `model`, `domain`, `fields`, `order`?, `limit` (1–200, default 200), `offset`? (0–100000) | `{ "records", "count", "truncated" }` |
+| `read` | `model`, `ids` (1–100), `fields` | `{ "records" }` |
+
+`models` never lists transient, abstract or hidden models. Records come in
+Odoo's `read` format: `id` plus the requested fields, many-to-one values as
+`[id, name]`, dates and datetimes as UTC strings. `count` counts every record
+the domain matches for the user; `truncated` tells whether more follow.
+
+Parameters are checked strictly, as the user, and a request with any invalid
+part is refused with `invalid_params`; nothing is silently dropped:
+
+- `fields` lists field names the user may read and that are not hidden.
+- `domain` is a JSON domain list (`["&", ["name", "ilike", "x"], …]`) parsed
+  by Odoo's domain machinery. Every field path is checked hop by hop:
+  readable and not hidden; every hop but the last a relational field to a
+  model the user may read, whose searches apply that model's rules; at most
+  4 hops. `any` / `not any` sub-domains are checked against the related
+  model. Values are JSON scalars or lists of scalars.
+- `order` is a comma-separated list of `field`, `field asc` or `field desc`
+  on sortable, readable, non-hidden fields.
+- `read` answers `access_denied` when any of the ids does not exist or is
+  not readable by the user, without telling which, so the answer does not
+  reveal whether a hidden record exists.
 
 ### Hidden models and fields
 

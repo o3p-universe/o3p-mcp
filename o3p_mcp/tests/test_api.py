@@ -8,6 +8,7 @@ from odoo import fields
 from odoo.tests import tagged
 from odoo.tools import mute_logger
 
+from ..models.api import DEFAULT_DENIED_FIELDS
 from .api_common import API_URL, O3pMcpApiCase, basic
 from .common import REDIRECT_URI, RESOURCE
 
@@ -274,3 +275,177 @@ class TestApiLimitsAndAudit(O3pMcpApiCase):
         self.env["o3p.mcp.token"]._purge_expired()
         self.assertFalse(old.exists())
         self.assertTrue(recent.exists())
+
+
+MCPT = [["name", "=like", "MCPT %"]]
+
+
+@tagged("post_install", "-at_install")
+class TestApiSearchRead(O3pMcpApiCase):
+    def search(self, user="restricted", **params):
+        params = {"model": "res.partner", "domain": MCPT, "fields": ["name", "color"], **params}
+        return self.result("search", params, user=user)
+
+    def test_search_respects_record_rules(self):
+        result = self.search(order="color asc")
+        self.assertEqual(set(result), {"records", "count", "truncated"})
+        self.assertEqual(
+            result["records"],
+            [
+                {"id": self.alpha.id, "name": "MCPT Alpha", "color": 3},
+                {"id": self.beta.id, "name": "MCPT Beta", "color": 4},
+            ],
+        )
+        self.assertEqual((result["count"], result["truncated"]), (2, False))
+        admin = self.search(user="admin", order="color desc")
+        self.assertEqual(admin["count"], 4)
+        self.assertEqual(admin["records"][0]["name"], "MCPT Hidden Two")
+        # Filtering on a hidden partner's value finds nothing.
+        self.assertEqual(self.search(domain=[["color", "=", 200]])["count"], 0)
+        self.assertEqual(self.search(domain=[["id", "=", self.hidden.id]])["records"], [])
+
+    def test_limit_offset_and_truncation(self):
+        page = self.search(user="admin", order="color asc", limit=1, offset=1)
+        self.assertEqual([row["name"] for row in page["records"]], ["MCPT Beta"])
+        self.assertEqual((page["count"], page["truncated"]), (4, True))
+        for params in ({"limit": 201}, {"limit": 0}, {"offset": -1}, {"limit": True}, {"offset": "1"}):
+            with self.subTest(params=params):
+                self.assertApiError(
+                    self.call("search", {"model": "res.partner", "fields": ["name"], **params}),
+                    "invalid_params",
+                )
+
+    def test_paths_and_sub_domains(self):
+        for domain in (
+            [["category_id.name", "=", "MCP visible"]],
+            [["category_id", "any", [["name", "=", "MCP visible"]]]],
+            ["|", ["color", "=", 3], ["color", "in", [4, 100]]],
+            ["!", ["color", ">", 3]],
+        ):
+            with self.subTest(domain=domain):
+                result = self.search(user="admin", domain=MCPT + domain)
+                self.assertGreaterEqual(result["count"], 1)
+        self.assertEqual(
+            self.search(domain=MCPT + [["color", "in", [3, 4, 100, 200]]])["count"], 2
+        )
+
+    def test_malformed_domains(self):
+        for domain in (
+            "name = 'x'",
+            {"name": "x"},
+            [["name", "=="]],
+            [["name", "bogus", "x"]],
+            [["name", "=", {"a": 1}]],
+            [["name", "in", [["nested"]]]],
+            [["nope", "=", 1]],
+            [["name.x", "=", 1]],
+            [["category_id.nope", "=", 1]],
+            [["category_id", "any", "x"]],
+            [["category_id", "any", [["nope", "=", 1]]]],
+            [["Name", "=", "x"]],
+            [["parent_id.parent_id.parent_id.parent_id.name", "=", "x"]],
+            ["&"],
+            [[1, "=", 1]],
+            [["name", "=", "x" * 1001]],
+        ):
+            with self.subTest(domain=domain):
+                message = self.assertApiError(
+                    self.call("search", {"model": "res.partner", "domain": domain, "fields": ["name"]}),
+                    "invalid_params",
+                )
+                self.assertNotIn("MCPT", message)
+
+    def test_field_groups_in_fields_domain_and_order(self):
+        with self.protected_field("res.partner", "function"):
+            for params in (
+                {"fields": ["name", "function"]},
+                {"domain": [["function", "=", "Boss"]]},
+                {"domain": [["category_id", "any", [["name", "!=", False]]], ["function", "!=", False]]},
+                {"order": "function desc"},
+            ):
+                with self.subTest(params=params):
+                    self.assertApiError(
+                        self.call("search", {"model": "res.partner", "fields": ["name"], **params}),
+                        "invalid_params",
+                    )
+            self.assertApiError(
+                self.call("read", {"model": "res.partner", "ids": [self.alpha.id], "fields": ["function"]}),
+                "invalid_params",
+            )
+            admin = self.search(user="admin", fields=["function"], order="function desc")
+            self.assertEqual(admin["count"], 4)
+
+    def test_denylist_applies_inside_domains_and_order_for_admins(self):
+        self.env["ir.config_parameter"].sudo().set_str(
+            "o3p_mcp.api_denied_fields", "\n".join([*DEFAULT_DENIED_FIELDS, "color"])
+        )
+        for params in (
+            {"fields": ["name", "color"]},
+            {"domain": MCPT + [["color", ">", 100]]},
+            {"order": "color desc"},
+            {"domain": [["category_id", "any", [["color", "=", 0]]]]},
+        ):
+            with self.subTest(params=params):
+                self.assertApiError(
+                    self.call("search", {"model": "res.partner", "fields": ["name"], **params}, user="admin"),
+                    "invalid_params",
+                )
+        # Fields and paths into hidden models or binary fields.
+        for params in (
+            {"model": "res.users", "fields": ["login"], "domain": [["api_key_ids.name", "=", "x"]]},
+            {"model": "res.users", "fields": ["password"]},
+            {"model": "res.users", "fields": ["login"], "domain": [["password", "!=", False]]},
+            {"model": "res.partner", "fields": ["image_1920"]},
+            {"model": "res.partner", "fields": ["name"], "domain": [["image_1920", "!=", False]]},
+        ):
+            with self.subTest(params=params):
+                self.assertApiError(self.call("search", params, user="admin"), "invalid_params")
+        self.assertApiError(
+            self.call("search", {"model": "ir.config_parameter", "fields": ["key"]}, user="admin"),
+            "unknown_model",
+        )
+
+    def test_order_validation(self):
+        self.assertEqual(
+            [row["name"] for row in self.search(user="admin", order="color desc, name")["records"]][:1],
+            ["MCPT Hidden Two"],
+        )
+        for order in ("color; drop table x", "color desc nulls first", "color descending", "nope", "display_name", "", 3, "category_id.name"):
+            with self.subTest(order=order):
+                self.assertApiError(
+                    self.call("search", {"model": "res.partner", "fields": ["name"], "order": order}),
+                    "invalid_params",
+                )
+
+    def test_read_direct_ids(self):
+        result = self.result(
+            "read", {"model": "res.partner", "ids": [self.beta.id, self.alpha.id], "fields": ["name"]}
+        )
+        self.assertEqual(
+            result,
+            {"records": [{"id": self.beta.id, "name": "MCPT Beta"}, {"id": self.alpha.id, "name": "MCPT Alpha"}]},
+        )
+        for ids in ([self.alpha.id, self.hidden.id], [self.hidden2.id], [999999]):
+            with self.subTest(ids=ids):
+                response = self.call("read", {"model": "res.partner", "ids": ids, "fields": ["name"]})
+                self.assertApiError(response, "access_denied")
+                self.assertNotIn("Hidden", response.text)
+        self.assertEqual(
+            len(self.result("read", {"model": "res.partner", "ids": [self.hidden.id], "fields": ["name"]}, user="admin")["records"]),
+            1,
+        )
+        for ids in ([], [0], ["1"], [True], list(range(1, 102)), "1"):
+            with self.subTest(ids=ids):
+                self.assertApiError(
+                    self.call("read", {"model": "res.partner", "ids": ids, "fields": ["name"]}),
+                    "invalid_params",
+                )
+
+    def test_related_values_and_size_cap(self):
+        rows = self.result(
+            "read", {"model": "res.partner", "ids": [self.alpha.id], "fields": ["category_id", "create_date"]}
+        )["records"]
+        self.assertEqual(rows[0]["category_id"], [self.visible.id])
+        self.assertIsInstance(rows[0]["create_date"], str)
+        self.env["ir.config_parameter"].sudo().set_int("o3p_mcp.api_max_response_bytes", 150)
+        self.assertApiError(self.call("search", {"model": "res.partner", "domain": MCPT, "fields": ["name"]}, user="admin"), "result_too_large")
