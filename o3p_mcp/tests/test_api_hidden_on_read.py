@@ -146,6 +146,17 @@ class TestPrivateCalendarEvents(O3pMcpApiCase):
                     "invalid_params",
                 )
 
+    def test_describe_marks_private_fields_unusable(self):
+        fields_by_name = {
+            item["name"]: item
+            for item in self.result("describe", {"model": "calendar.event"}, user="carol")["fields"]
+        }
+        self.assertFalse(fields_by_name["name"]["searchable"])
+        self.assertFalse(fields_by_name["name"]["sortable"])
+        self.assertTrue(fields_by_name["name"]["stored"])
+        self.assertTrue(fields_by_name["start"]["searchable"])
+        self.assertTrue(fields_by_name["user_id"]["groupable"])
+
     def test_public_fields_still_work(self):
         response = self.search(domain=[["user_id", "=", self.bob.id], ["privacy", "=", "private"]], order="start desc")
         self.assertEqual(response.status_code, 200, response.text)
