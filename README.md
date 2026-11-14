@@ -235,6 +235,28 @@ at once in Odoo (the MCP server may cache an answer for up to a minute).
    protected-resource metadata, discovers Odoo, registers itself, opens the
    Odoo sign-in page and asks the user for consent.
 
+### okf-mcp options
+
+- `--public-url` is mandatory with `--auth introspect:…` and must equal the
+  MCP server URL configured in Odoo; one trailing slash is ignored on either
+  side. Odoo reports that URL as `aud`, and okf-mcp accepts only tokens whose
+  `aud` matches.
+- Write tools additionally need `--write --actor <actor>`, and `--git-commit`
+  for changes to be committed; the token then needs `okf.write`, which only
+  MCP editors get.
+- Binding a non-loopback `--host` requires `--auth`.
+- The issuer given to `--authorization-server` must be https (or
+  `localhost`), and the introspection URL https (http only on a loopback
+  host). The issuer setting in Odoo follows the same rule.
+- okf-mcp sends the introspection credentials with HTTP Basic,
+  form-urlencoding them first as RFC 6749 §2.3.1 requires; Odoo decodes them
+  the same way. Client IDs (`c_` and hexadecimal digits) and secrets
+  (URL-safe base64 from `secrets.token_urlsafe`) contain only URL-safe
+  characters, so the encoding leaves them unchanged.
+- okf-mcp answers `GET /health` both at its origin and next to the MCP
+  endpoint (`/okf/mcp` → `/okf/health`), so **Check MCP server** works for
+  either layout.
+
 ## Deployment notes
 
 - The issuer starts as `web.base.url` when the addon is installed; set it
