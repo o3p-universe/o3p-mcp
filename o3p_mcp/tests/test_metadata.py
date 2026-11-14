@@ -187,23 +187,47 @@ class TestMetadataAndRegistration(HttpCase):
         self.assertEqual(after["issuer"], "https://odoo.example.com")
 
     def test_cors_preflight(self):
-        for url in (METADATA_URL, REGISTER_URL):
+        # MCP clients in a browser send MCP-Protocol-Version with every
+        # request, so the preflight must allow it next to the usual headers.
+        for url, method in (
+            (METADATA_URL, "GET"),
+            (REGISTER_URL, "POST"),
+            ("/o3p_mcp/oauth/token", "POST"),
+            ("/o3p_mcp/oauth/revoke", "POST"),
+        ):
             with self.subTest(url=url):
                 response = url_request(
                     self,
                     "OPTIONS",
                     url,
                     headers={
-                        "Origin": "https://inspector.example.com",
-                        "Access-Control-Request-Method": "POST",
-                        "Access-Control-Request-Headers": "content-type",
+                        "Origin": "http://localhost:6274",
+                        "Access-Control-Request-Method": method,
+                        "Access-Control-Request-Headers": "authorization,content-type,mcp-protocol-version",
                     },
                 )
                 self.assertEqual(response.status_code, 204)
                 self.assertEqual(response.headers["Access-Control-Allow-Origin"], "*")
-                self.assertIn(
-                    "Content-Type", response.headers["Access-Control-Allow-Headers"]
+                self.assertEqual(
+                    response.headers["Access-Control-Allow-Headers"],
+                    "Authorization, Content-Type, MCP-Protocol-Version",
                 )
+                self.assertIn(method, response.headers["Access-Control-Allow-Methods"])
+        # Server-to-server endpoints stay without CORS.
+        for url in ("/o3p_mcp/oauth/introspect", "/o3p_mcp/api/v1/models"):
+            with self.subTest(url=url):
+                response = url_request(
+                    self,
+                    "OPTIONS",
+                    url,
+                    headers={
+                        "Origin": "http://localhost:6274",
+                        "Access-Control-Request-Method": "POST",
+                        "Access-Control-Request-Headers": "mcp-protocol-version",
+                    },
+                )
+                self.assertNotIn("Access-Control-Allow-Origin", response.headers)
+                self.assertNotIn("Access-Control-Allow-Headers", response.headers)
 
     def test_register_public_client(self):
         response = self.register(
