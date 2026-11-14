@@ -48,6 +48,7 @@ DEFAULT_TIMEOUT_SECONDS = 15
 DEFAULT_LOG_DAYS = 30
 MAX_MODELS = 50
 MAX_QUERY_LENGTH = 200
+MAX_MODELS_OFFSET = 10_000
 MAX_SEARCH = 200
 MAX_GROUPS = 500
 MAX_GROUPBY = 5
@@ -214,7 +215,7 @@ class O3pMcpApi(models.AbstractModel):
     # Operation -> (method, scope, parameters). The sql operation lives in
     # api_sql.py.
     _OPS = {
-        "models": ("_op_models", SCOPE_ODOO_READ, {"query", "limit"}),
+        "models": ("_op_models", SCOPE_ODOO_READ, {"query", "limit", "offset"}),
         "describe": ("_op_describe", SCOPE_ODOO_READ, {"model"}),
         "search": (
             "_op_search",
@@ -750,16 +751,23 @@ class O3pMcpApi(models.AbstractModel):
             for name in sorted(self.env.registry)
             if self._exposed_model(name) and self.env[name].has_access("read")
         ]
+        offset = self._int_param(params.get("offset"), 0, 0, MAX_MODELS_OFFSET, "offset")
         labels = self._model_labels(names)
         needle = (query or "").strip().lower()
-        result = [
+        matching = [
             {"model": name, "name": labels.get(name) or self.env[name]._description or name}
             for name in names
             if not needle
             or needle in name.lower()
             or needle in (labels.get(name) or "").lower()
-        ][:limit]
-        return result, None, len(result)
+        ]
+        page = matching[offset:offset + limit]
+        result = {
+            "models": page,
+            "total": len(matching),
+            "truncated": offset + len(page) < len(matching),
+        }
+        return result, None, len(page)
 
     def _op_describe(self, params):
         model = self._model(params.get("model"))
