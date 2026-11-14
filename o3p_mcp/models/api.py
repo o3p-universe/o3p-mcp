@@ -545,6 +545,10 @@ class O3pMcpApi(models.AbstractModel):
         field = self._filterable_fields(model).get(names[0])
         if field is None:
             raise self._field_problem(model, names[0], path, MSG_DOMAIN)
+        # Odoo silently ignores a condition on a computed field it cannot
+        # search (not stored, no search method): the answer would be wrong.
+        if not field._description_searchable:
+            raise invalid("not_searchable", path, message=MSG_DOMAIN)
         if len(names) > 1:
             comodel = self._comodel(model, field, path)
             return [
