@@ -1,5 +1,7 @@
+import base64
 import json
 from datetime import timedelta
+from urllib.parse import quote_plus
 from unittest.mock import patch
 
 from psycopg2 import errors as pg_errors
@@ -9,6 +11,7 @@ from odoo.tests import tagged
 from odoo.tools import mute_logger
 
 from ..models.api import DEFAULT_DENIED_FIELDS
+from ..models.oauth import hash_secret
 from .api_common import API_URL, O3pMcpApiCase, basic
 from .common import REDIRECT_URI, RESOURCE
 
@@ -37,6 +40,19 @@ class TestApiAuthentication(O3pMcpApiCase):
                 response = self.call("models", headers=headers)
                 self.assertApiError(response, "invalid_client")
                 self.assertEqual(response.headers["WWW-Authenticate"], 'Basic realm="o3p_mcp"')
+
+    def test_basic_credentials_are_form_urlencoded(self):
+        # RFC 6749 section 2.3.1: the client form-urlencodes id and secret.
+        client_id, secret = "c_ odd+id:é", "s p+a:ce é"
+        self.server.client_id = client_id
+        self.server.sudo().secret_hash = hash_secret(secret)
+        raw = f"{quote_plus(client_id)}:{quote_plus(secret)}".encode()
+        headers = {"Authorization": f"Basic {base64.b64encode(raw).decode()}"}
+        self.assertEqual(self.call("models", headers=headers).status_code, 200)
+        # Without the encoding the plus sign reads as a space.
+        raw = f"{client_id.replace(':', '%3A')}:{secret}".encode()
+        headers = {"Authorization": f"Basic {base64.b64encode(raw).decode()}"}
+        self.assertApiError(self.call("models", headers=headers), "invalid_client")
 
     def test_body_must_be_an_object(self):
         for raw in ("not json", "[]", '"token"'):
@@ -284,6 +300,7 @@ MCPT = [["name", "=like", "MCPT %"]]
 class TestApiSearchRead(O3pMcpApiCase):
     def search(self, user="restricted", **params):
         params = {"model": "res.partner", "domain": MCPT, "fields": ["name", "color"], **params}
+        params = {key: value for key, value in params.items() if value is not None}
         return self.result("search", params, user=user)
 
     def test_search_respects_record_rules(self):
@@ -308,7 +325,16 @@ class TestApiSearchRead(O3pMcpApiCase):
         page = self.search(user="admin", order="color asc", limit=1, offset=1)
         self.assertEqual([row["name"] for row in page["records"]], ["MCPT Beta"])
         self.assertEqual((page["count"], page["truncated"]), (4, True))
-        for params in ({"limit": 201}, {"limit": 0}, {"offset": -1}, {"limit": True}, {"offset": "1"}):
+        self.assertEqual(self.search(user="admin", offset=1_000_000)["records"], [])
+        self.assertEqual(self.search(user="admin", limit=None)["count"], 4)
+        for params in (
+            {"limit": 201},
+            {"limit": 0},
+            {"offset": -1},
+            {"offset": 1_000_001},
+            {"limit": True},
+            {"offset": "1"},
+        ):
             with self.subTest(params=params):
                 self.assertApiError(
                     self.call("search", {"model": "res.partner", "fields": ["name"], **params}),
@@ -335,6 +361,9 @@ class TestApiSearchRead(O3pMcpApiCase):
             {"name": "x"},
             [["name", "=="]],
             [["name", "bogus", "x"]],
+            [["id", "access", "read"]],
+            [["name", "not =like", "x"]],
+            [["partner_id", "any!", []]],
             [["name", "=", {"a": 1}]],
             [["name", "in", [["nested"]]]],
             [["nope", "=", 1]],
@@ -405,6 +434,17 @@ class TestApiSearchRead(O3pMcpApiCase):
             "unknown_model",
         )
 
+    def test_unknown_parameters_are_refused(self):
+        for op, params in (
+            ("search", {"model": "res.partner", "fields": ["name"], "having": []}),
+            ("search", {"model": "res.partner", "fields": ["name"], "context": {"active_test": False}}),
+            ("read", {"model": "res.partner", "ids": [self.alpha.id], "fields": ["name"], "load": None}),
+            ("describe", {"model": "res.partner", "fields": ["name"]}),
+            ("models", {"model": "res.partner"}),
+        ):
+            with self.subTest(op=op, params=params):
+                self.assertApiError(self.call(op, params), "invalid_params")
+
     def test_order_validation(self):
         self.assertEqual(
             [row["name"] for row in self.search(user="admin", order="color desc, name")["records"]][:1],
@@ -425,10 +465,17 @@ class TestApiSearchRead(O3pMcpApiCase):
             result,
             {"records": [{"id": self.beta.id, "name": "MCPT Beta"}, {"id": self.alpha.id, "name": "MCPT Alpha"}]},
         )
-        for ids in ([self.alpha.id, self.hidden.id], [self.hidden2.id], [999999]):
+        # Hidden and missing records are left out alike.
+        for ids, expected in (
+            ([self.alpha.id, self.hidden.id], [self.alpha.id]),
+            ([self.hidden2.id], []),
+            ([999999], []),
+            ([self.hidden.id, 999999, self.beta.id], [self.beta.id]),
+        ):
             with self.subTest(ids=ids):
                 response = self.call("read", {"model": "res.partner", "ids": ids, "fields": ["name"]})
-                self.assertApiError(response, "access_denied")
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual([row["id"] for row in response.json()["result"]["records"]], expected)
                 self.assertNotIn("Hidden", response.text)
         self.assertEqual(
             len(self.result("read", {"model": "res.partner", "ids": [self.hidden.id], "fields": ["name"]}, user="admin")["records"]),

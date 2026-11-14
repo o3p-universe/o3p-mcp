@@ -183,8 +183,9 @@ HTTP 200 once the client is authenticated.
 
 The MCP server reads Odoo data on behalf of a signed-in user through
 `POST /o3p_mcp/api/v1/<op>`. It authenticates with HTTP Basic as the
-resource-server client (the introspection credentials) and passes the user's
-access token in the JSON body:
+resource-server client (the introspection credentials, form-urlencoded before
+base64 as RFC 6749 §2.3.1 requires) and passes the user's access token in the
+JSON body:
 
 ```json
 { "token": "<the user's access token>", "params": { "model": "res.partner" } }
@@ -223,7 +224,7 @@ never contains an exception text, a parameter or record data:
 | `models` | `query` (optional, matched on the technical and the display name), `limit` (1–50, default 50) | `[{ "model", "name" }]`: the models the user may read |
 | `describe` | `model` | `{ "model", "name", "fields": [{ "name", "string", "type", "relation"?, "required", "readonly", "selection"?, "help"? }] }`: the fields the user may read |
 
-| `search` | `model`, `domain`, `fields`, `order`?, `limit` (1–200, default 200), `offset`? (0–100000) | `{ "records", "count", "truncated" }` |
+| `search` | `model`, `domain`, `fields`, `order`?, `limit` (1–200, default 80), `offset`? (0–1000000) | `{ "records", "count", "truncated" }` |
 | `read` | `model`, `ids` (1–100), `fields` | `{ "records" }` |
 
 `models` never lists transient, abstract or hidden models. Records come in
@@ -232,7 +233,8 @@ Odoo's `read` format: `id` plus the requested fields, many-to-one values as
 the domain matches for the user; `truncated` tells whether more follow.
 
 Parameters are checked strictly, as the user, and a request with any invalid
-part is refused with `invalid_params`; nothing is silently dropped:
+part, or a parameter the operation does not take, is refused with
+`invalid_params`; nothing is silently dropped:
 
 - `fields` lists field names the user may read and that are not hidden.
 - `domain` is a JSON domain list (`["&", ["name", "ilike", "x"], …]`) parsed
@@ -240,12 +242,15 @@ part is refused with `invalid_params`; nothing is silently dropped:
   readable and not hidden; every hop but the last a relational field to a
   model the user may read, whose searches apply that model's rules; at most
   4 hops. `any` / `not any` sub-domains are checked against the related
-  model. Values are JSON scalars or lists of scalars.
+  model. Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `=?`, `in`, `not in`,
+  `like`, `not like`, `ilike`, `not ilike`, `=like`, `=ilike`, `child_of`,
+  `parent_of`, `any`, `not any`. Values are JSON scalars or lists of
+  scalars.
 - `order` is a comma-separated list of `field`, `field asc` or `field desc`
   on sortable, readable, non-hidden fields.
-- `read` answers `access_denied` when any of the ids does not exist or is
-  not readable by the user, without telling which, so the answer does not
-  reveal whether a hidden record exists.
+- `read` returns the records the user may read, in the order of `ids`; ids
+  that do not exist and records the user may not read are left out alike,
+  so the answer does not reveal whether a hidden record exists.
 
 ### Hidden models and fields
 

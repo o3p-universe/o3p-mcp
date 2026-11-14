@@ -31,7 +31,8 @@ MAX_MODELS = 50
 MAX_QUERY_LENGTH = 200
 MAX_SEARCH = 200
 MAX_READ = 100
-MAX_OFFSET = 100_000
+MAX_OFFSET = 1_000_000
+DEFAULT_LIMIT = 80
 MAX_FIELDS = 200
 MAX_DOMAIN_ITEMS = 200
 MAX_DOMAIN_DEPTH = 4
@@ -48,7 +49,15 @@ MSG_DOMAIN = (
 MSG_ORDER = "The order is not valid: use 'field' or 'field desc' items on sortable readable fields."
 MSG_RANGE = "limit or offset is out of range."
 MSG_IDS = "ids must be a list of 1 to 100 record ids."
-MSG_RECORDS = "Some records do not exist or you may not read them."
+MSG_KEYS = "The operation does not take one of the parameters."
+# Domain operators accepted from clients.
+OPERATORS = frozenset(
+    {
+        "=", "!=", ">", ">=", "<", "<=", "=?", "in", "not in", "like", "not like",
+        "ilike", "not ilike", "=like", "=ilike", "child_of", "parent_of", "any",
+        "not any",
+    }
+)
 
 # Error code -> (HTTP status, default message). Messages are fixed texts:
 # never an exception text, a parameter or record data.
@@ -89,12 +98,17 @@ class O3pMcpApi(models.AbstractModel):
     _name = "o3p.mcp.api"
     _description = "MCP Data API"
 
-    # Operation -> (method, scope). The sql operation is not offered yet.
+    # Operation -> (method, scope, parameters). The sql operation is not
+    # offered yet.
     _OPS = {
-        "models": ("_op_models", SCOPE_ODOO_READ),
-        "describe": ("_op_describe", SCOPE_ODOO_READ),
-        "search": ("_op_search", SCOPE_ODOO_READ),
-        "read": ("_op_read", SCOPE_ODOO_READ),
+        "models": ("_op_models", SCOPE_ODOO_READ, {"query", "limit"}),
+        "describe": ("_op_describe", SCOPE_ODOO_READ, {"model"}),
+        "search": (
+            "_op_search",
+            SCOPE_ODOO_READ,
+            {"model", "domain", "fields", "order", "limit", "offset"},
+        ),
+        "read": ("_op_read", SCOPE_ODOO_READ, {"model", "ids", "fields"}),
     }
 
     # ------------------------------------------------------------------
@@ -180,7 +194,10 @@ class O3pMcpApi(models.AbstractModel):
         """
         if not isinstance(params, dict):
             raise ApiError("invalid_params")
-        method = getattr(self, self._OPS[op][0])
+        method_name, _scope, keys = self._OPS[op]
+        if not set(params) <= keys:
+            raise ApiError("invalid_params", MSG_KEYS)
+        method = getattr(self, method_name)
         self.env.flush_all()
         cr = self.env.cr
         cr.execute("SAVEPOINT o3p_mcp_api")
@@ -336,7 +353,7 @@ class O3pMcpApi(models.AbstractModel):
             if not isinstance(item, list) or len(item) != 3:
                 raise ApiError("invalid_params", MSG_DOMAIN)
             path, operator, operand = item
-            if not isinstance(operator, str):
+            if not isinstance(operator, str) or operator not in OPERATORS:
                 raise ApiError("invalid_params", MSG_DOMAIN)
             if operator in ("any", "not any"):
                 comodel = self._path_model(model, path, relational_end=True)
@@ -437,7 +454,7 @@ class O3pMcpApi(models.AbstractModel):
         domain = self._domain_param(model, params.get("domain"))
         names = self._fields_param(model, params.get("fields"))
         order = self._order_param(model, params.get("order"))
-        limit = self._int_param(params.get("limit"), MAX_SEARCH, 1, MAX_SEARCH)
+        limit = self._int_param(params.get("limit"), DEFAULT_LIMIT, 1, MAX_SEARCH)
         offset = self._int_param(params.get("offset"), 0, 0, MAX_OFFSET)
         records = model.search_fetch(domain, names, offset=offset, limit=limit, order=order)
         rows = records.read(names)
@@ -455,10 +472,8 @@ class O3pMcpApi(models.AbstractModel):
         ):
             raise ApiError("invalid_params", MSG_IDS)
         names = self._fields_param(model, params.get("fields"))
-        records = model.browse(list(dict.fromkeys(ids)))
-        # Missing and forbidden records are refused alike, so the answer does
-        # not tell whether a hidden record exists.
-        if len(records.exists()._filtered_access("read")) != len(records):
-            raise ApiError("access_denied", MSG_RECORDS)
+        # Records that do not exist and records the user may not read are left
+        # out alike, so the answer does not tell whether a hidden record exists.
+        records = model.browse(list(dict.fromkeys(ids))).exists()._filtered_access("read")
         rows = records.read(names)
         return {"records": rows}, model._name, len(rows)
