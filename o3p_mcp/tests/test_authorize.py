@@ -189,3 +189,12 @@ class TestAuthorize(O3pMcpHttpCase):
                 self.assertIn("code", query)
                 if "tenant" in uri:
                     self.assertEqual(query["tenant"], "7")
+
+    def test_options_request_cannot_approve(self):
+        self.authenticate("o3p_mcp_editor", "o3p_mcp_editor")
+        params = dict(self.authorization_params(), decision="approve")
+        response = self.url_open(
+            AUTHORIZE_URL, data=params, method="OPTIONS", allow_redirects=False
+        )
+        self.assertNotIn("code=", response.headers.get("Location", ""))
+        self.assertFalse(self.Code.search([]))

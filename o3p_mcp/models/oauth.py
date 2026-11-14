@@ -25,6 +25,8 @@ METADATA_PATH = "/.well-known/oauth-authorization-server"
 AUTHORIZE_PATH = "/o3p_mcp/oauth/authorize"
 TOKEN_PATH = "/o3p_mcp/oauth/token"
 REGISTER_PATH = "/o3p_mcp/oauth/register"
+INTROSPECT_PATH = "/o3p_mcp/oauth/introspect"
+REVOKE_PATH = "/o3p_mcp/oauth/revoke"
 
 # An S256 code challenge is a base64url SHA-256 digest without padding.
 CODE_CHALLENGE_RE = re.compile(r"[A-Za-z0-9_-]{43}")
@@ -310,12 +312,16 @@ class O3pMcpOauth(models.AbstractModel):
             "authorization_endpoint": f"{issuer}{AUTHORIZE_PATH}",
             "token_endpoint": f"{issuer}{TOKEN_PATH}",
             "registration_endpoint": f"{issuer}{REGISTER_PATH}",
+            "revocation_endpoint": f"{issuer}{REVOKE_PATH}",
+            "introspection_endpoint": f"{issuer}{INTROSPECT_PATH}",
             "scopes_supported": list(SCOPES),
             "response_types_supported": ["code"],
             "response_modes_supported": ["query"],
             "grant_types_supported": list(GRANT_TYPES),
             "code_challenge_methods_supported": ["S256"],
             "token_endpoint_auth_methods_supported": list(CLIENT_AUTH_METHODS),
+            "revocation_endpoint_auth_methods_supported": list(CLIENT_AUTH_METHODS),
+            "introspection_endpoint_auth_methods_supported": ["client_secret_basic"],
             "authorization_response_iss_parameter_supported": True,
         }
 

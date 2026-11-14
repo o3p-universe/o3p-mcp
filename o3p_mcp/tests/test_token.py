@@ -1,5 +1,4 @@
 import base64
-import logging
 from datetime import timedelta
 
 from odoo import fields
@@ -229,43 +228,3 @@ class TestTokenEndpoint(O3pMcpTokenCase):
         self.assertEqual(preflight.headers["Access-Control-Allow-Origin"], "*")
         self.assertIn("Authorization", preflight.headers["Access-Control-Allow-Headers"])
         self.assertEqual(self.url_open(TOKEN_URL).status_code, 405)
-
-
-class _Capture(logging.Handler):
-    def __init__(self):
-        super().__init__(logging.DEBUG)
-        self.messages = []
-
-    def emit(self, record):
-        message = record.getMessage()
-        if record.exc_info:
-            message += logging.Formatter().formatException(record.exc_info)
-        self.messages.append(message)
-
-
-@tagged("post_install", "-at_install")
-class TestNoSecretsInLogs(O3pMcpTokenCase):
-    def test_flow_logs_no_secret(self):
-        capture = _Capture()
-        root = logging.getLogger()
-        root.addHandler(capture)
-        try:
-            code = self.authorize_code()
-            first = self.exchange(code).json()
-            second = self.refresh(first["refresh_token"]).json()
-            self.refresh(first["refresh_token"])  # replay
-            self.exchange(code)  # reuse
-            self.refresh("not-a-token")
-        finally:
-            root.removeHandler(capture)
-        self.assertTrue(capture.messages)
-        logged = "\n".join(capture.messages)
-        for secret in (
-            code,
-            self.verifier,
-            first["access_token"],
-            first["refresh_token"],
-            second["access_token"],
-            second["refresh_token"],
-        ):
-            self.assertNotIn(secret, logged)

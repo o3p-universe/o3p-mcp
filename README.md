@@ -46,9 +46,12 @@ All URLs are relative to `web.base.url`, which is also the issuer.
 | `POST /o3p_mcp/oauth/register` | Dynamic client registration (RFC 7591) |
 | `GET`, `POST /o3p_mcp/oauth/authorize` | Sign-in and consent (authorization code with PKCE) |
 | `POST /o3p_mcp/oauth/token` | Token endpoint (authorization code and refresh token grants) |
+| `POST /o3p_mcp/oauth/introspect` | Token introspection for the MCP server (RFC 7662) |
+| `POST /o3p_mcp/oauth/revoke` | Token revocation (RFC 7009) |
 
-The metadata, registration and token endpoints answer cross-origin requests
-(`Access-Control-Allow-Origin: *`) and never create a session.
+The metadata, registration, token and revocation endpoints answer
+cross-origin requests (`Access-Control-Allow-Origin: *`); introspection does
+not. None of the API endpoints creates a session.
 
 ### Client registration
 
@@ -121,6 +124,35 @@ The response is `access_token`, `token_type` (`Bearer`), `expires_in`,
 `refresh_token` and `scope`. Errors follow RFC 6749 (`invalid_client` with
 HTTP 401, `invalid_grant`, `invalid_scope`, `invalid_target`,
 `unsupported_grant_type`).
+
+### Introspection
+
+The MCP server posts `token=<access token>` to
+`/o3p_mcp/oauth/introspect`, authenticated with HTTP Basic as a
+resource-server client. Missing or wrong credentials get HTTP 401 with
+`WWW-Authenticate: Basic`. An active token answers:
+
+```json
+{ "active": true, "sub": "42", "username": "jdoe", "name": "Jane Doe",
+  "email": "jdoe@example.com", "scope": "okf.read okf.write",
+  "aud": "https://mcp.example.com/mcp", "exp": 1794000000, "client_id": "c_…" }
+```
+
+`sub` is the Odoo user ID, `username` the login, `aud` the configured MCP
+URL, `exp` the access token expiry (seconds since the epoch) and `client_id`
+the MCP client the token was issued to. `scope` is recomputed from the user's
+current groups at every call. `email` is left out when the user has none.
+Every other case (unknown, expired, revoked, refresh token, archived user or
+client, user without the MCP User group) answers exactly
+`{ "active": false }`.
+
+### Revocation
+
+`POST /o3p_mcp/oauth/revoke` with `token` (access or refresh token) and
+optionally `token_type_hint`, authenticated like the token endpoint. Revoking
+either token revokes every token of the same authorization. Unknown tokens
+and tokens of other clients are ignored; the answer is always an empty
+HTTP 200 once the client is authenticated.
 
 ## Installation
 

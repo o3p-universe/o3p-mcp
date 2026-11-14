@@ -2,13 +2,17 @@ import base64
 import binascii
 from urllib.parse import parse_qsl, unquote_plus, urlencode, urlsplit, urlunsplit
 
+from werkzeug.exceptions import MethodNotAllowed
+
 from odoo import http
 from odoo.http import request
 
 from ..models.oauth import (
     AUTHORIZE_PATH,
+    INTROSPECT_PATH,
     METADATA_PATH,
     REGISTER_PATH,
+    REVOKE_PATH,
     TOKEN_PATH,
     AuthorizationError,
     OAuthError,
@@ -43,11 +47,13 @@ def json_response(data, status=200, headers=()):
     )
 
 
-def error_response(error):
+def error_response(error, basic_challenge=False):
     headers = []
     if error.status == 429:
         headers.append(("Retry-After", "3600"))
-    if error.status == 401 and request.httprequest.headers.get("Authorization"):
+    if error.status == 401 and (
+        basic_challenge or request.httprequest.headers.get("Authorization")
+    ):
         headers.append(("WWW-Authenticate", 'Basic realm="o3p_mcp"'))
     return json_response(error.to_dict(), status=error.status, headers=headers)
 
@@ -211,6 +217,56 @@ class O3pMcpOauthController(http.Controller):
             return error_response(error)
         return json_response(response)
 
+    @http.route(
+        INTROSPECT_PATH,
+        type="http",
+        auth="none",
+        methods=["POST"],
+        csrf=False,
+        readonly=False,
+        save_session=False,
+    )
+    def introspect(self, **_params):
+        try:
+            client_id, secret, method = client_credentials()
+            if method != "client_secret_basic":
+                raise OAuthError(
+                    "invalid_client", "Client authentication failed.", status=401
+                )
+            request.env["o3p.mcp.client"]._authenticate(
+                client_id, secret, method, kind="resource_server"
+            )
+        except OAuthError as error:
+            return error_response(error, basic_challenge=True)
+        answer = request.env["o3p.mcp.token"]._introspect(
+            request.httprequest.form.get("token")
+        )
+        return json_response(answer)
+
+    @http.route(
+        REVOKE_PATH,
+        type="http",
+        auth="none",
+        methods=["POST"],
+        csrf=False,
+        cors="*",
+        readonly=False,
+        save_session=False,
+    )
+    def revoke(self, **_params):
+        form = request.httprequest.form
+        try:
+            client_id, secret, method = client_credentials()
+            client = request.env["o3p.mcp.client"]._authenticate(
+                client_id, secret, method
+            )
+        except OAuthError as error:
+            return error_response(error)
+        request.env["o3p.mcp.token"]._revoke(
+            form.get("token"), client, form.get("token_type_hint")
+        )
+        return request.make_response("", headers=NO_STORE)
+
     @http.route(AUTHORIZE_PATH, type="http", auth="user", methods=["GET"])
     def authorize(self, **params):
         oauth = request.env["o3p.mcp.oauth"]
@@ -249,6 +305,9 @@ class O3pMcpOauthController(http.Controller):
         readonly=False,
     )
     def authorize_decision(self, decision=None, **params):
+        # Odoo adds OPTIONS to every route and skips the CSRF check for it.
+        if request.httprequest.method != "POST":
+            raise MethodNotAllowed(["GET", "POST"])
         try:
             values = request.env["o3p.mcp.oauth"]._check_authorization(
                 params, request.env.user

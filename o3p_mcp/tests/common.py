@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import logging
 import re
 import secrets
 from urllib.parse import parse_qsl, urlencode, urlsplit
@@ -24,6 +25,27 @@ def location_of(response):
     """Return ``(uri without query, query dict)`` of a redirect response."""
     parts = urlsplit(response.headers["Location"])
     return parts._replace(query="").geturl(), dict(parse_qsl(parts.query))
+
+
+class LogCapture(logging.Handler):
+    """Collects every log message, with tracebacks, while installed."""
+
+    def __init__(self):
+        super().__init__(logging.DEBUG)
+        self.messages = []
+
+    def emit(self, record):
+        message = record.getMessage()
+        if record.exc_info:
+            message += logging.Formatter().formatException(record.exc_info)
+        self.messages.append(message)
+
+    def __enter__(self):
+        logging.getLogger().addHandler(self)
+        return self
+
+    def __exit__(self, *exc):
+        logging.getLogger().removeHandler(self)
 
 
 class O3pMcpCommon:

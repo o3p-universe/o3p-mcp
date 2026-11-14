@@ -201,6 +201,23 @@ class O3pMcpToken(models.Model):
             [("family", "in", families), ("revoked_at", "=", False)]
         ).write({"revoked_at": fields.Datetime.now()})
 
+    @api.model
+    def _revoke(self, value, client, token_type_hint=None):
+        """Revoke the family of ``value`` when it was issued to ``client``.
+
+        ``value`` may be an access or a refresh token (RFC 7009); unknown
+        tokens and tokens of other clients are ignored.
+        """
+        fields_order = ["access_hash", "refresh_hash"]
+        if token_type_hint == "refresh_token":
+            fields_order.reverse()
+        for field in fields_order:
+            token = find_by_secret(self, field, value)
+            if token:
+                if token.client_id == client:
+                    token._revoke_family()
+                return
+
     # ------------------------------------------------------------------
     # Introspection
     # ------------------------------------------------------------------

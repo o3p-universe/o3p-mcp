@@ -75,6 +75,8 @@ class TestMetadataAndRegistration(HttpCase):
                 "authorization_endpoint": f"{issuer}/o3p_mcp/oauth/authorize",
                 "token_endpoint": f"{issuer}/o3p_mcp/oauth/token",
                 "registration_endpoint": f"{issuer}/o3p_mcp/oauth/register",
+                "revocation_endpoint": f"{issuer}/o3p_mcp/oauth/revoke",
+                "introspection_endpoint": f"{issuer}/o3p_mcp/oauth/introspect",
                 "scopes_supported": ["okf.read", "okf.write"],
                 "response_types_supported": ["code"],
                 "response_modes_supported": ["query"],
@@ -85,6 +87,12 @@ class TestMetadataAndRegistration(HttpCase):
                     "client_secret_post",
                     "client_secret_basic",
                 ],
+                "revocation_endpoint_auth_methods_supported": [
+                    "none",
+                    "client_secret_post",
+                    "client_secret_basic",
+                ],
+                "introspection_endpoint_auth_methods_supported": ["client_secret_basic"],
                 "authorization_response_iss_parameter_supported": True,
             },
         )
