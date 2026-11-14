@@ -294,16 +294,34 @@ part, or a parameter the operation does not take, is refused with
   that do not exist and records the user may not read are left out alike,
   so the answer does not reveal whether a hidden record exists.
 
-### Values Odoo computes with elevated rights
+### What users can see
 
-The API shows what Odoo itself shows the user, no less and no more. Some
-fields are computed by Odoo with elevated rights, and their values are
-visible exactly as in Odoo's own interface for that user. For example, with
-the stock and sale apps, a product's forecast quantities (`outgoing_qty`,
-`virtual_available`) count every confirmed sales order, including orders of
-other salespeople the user may not open; the API returns the same numbers
-the product form shows that user. Add such fields to the hidden field names
-if they should not reach MCP clients.
+The API shows what Odoo itself shows the user, no less and no more:
+
+- Values Odoo computes with elevated rights are visible exactly as in
+  Odoo's own interface for that user. For example, with the stock and sale
+  apps, a product's forecast quantities (`outgoing_qty`,
+  `virtual_available`) count every confirmed sales order, including orders
+  of other salespeople the user may not open; the API returns the same
+  numbers the product form shows that user. Add such fields to the hidden
+  field names if they should not reach MCP clients.
+- A many-to-one value shows the related record's display name even when
+  the user may not open that record (`"partner_id": [7, "Customer"]`), as
+  Odoo's own forms and lists do.
+- Calendar attendees (`calendar.attendee`) are readable as Odoo makes them
+  readable to internal users.
+- Some models hide data when they are read rather than through access
+  rules: Odoo blanks other users' private calendar events (`Busy`). A domain,
+  an order or a group would still match the hidden values, so on such
+  models (any model whose `read`, `fetch`, `_fetch_query`, `search_fetch` or
+  `_read_format` an addon overrides) the API filters, sorts and groups only
+  on `id` and on the fields the model declares public (for calendar events:
+  times, duration, organizer, privacy, recurrence); anything else is
+  refused with `invalid_params`, also through relations such as
+  `res.partner.meeting_ids`. Reading fields is unaffected, since Odoo's own
+  read hides what it must. Overrides reviewed as hiding nothing are listed
+  in `models/denylist.py` (`account.move`, `account.move.line`, `crm.lead`,
+  `hr.employee`, `ir.actions.act_window`, `mrp.bom.line`).
 
 ### SQL
 

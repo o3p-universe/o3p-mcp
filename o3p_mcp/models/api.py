@@ -12,13 +12,21 @@ from psycopg2 import errors as pg_errors
 from odoo import api, fields, models
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.models import READ_GROUP_DISPLAY_FORMAT, READ_GROUP_TIME_GRANULARITY
-from odoo.tools import DEFAULT_SERVER_DATE_FORMAT, DEFAULT_SERVER_DATETIME_FORMAT, date_utils, get_lang
+from odoo.tools import (
+    DEFAULT_SERVER_DATE_FORMAT,
+    DEFAULT_SERVER_DATETIME_FORMAT,
+    date_utils,
+    get_lang,
+    ormcache,
+)
 
 from .denylist import (  # noqa: F401 - re-exported for callers of this module
     DEFAULT_DENIED_FIELDS,
     DEFAULT_DENIED_MODELS,
+    READ_OVERRIDES_REVIEWED,
     field_denied,
     model_denied,
+    overrides_read,
     patterns,
 )
 from .oauth import (
@@ -380,8 +388,7 @@ class O3pMcpApi(models.AbstractModel):
         if any(isinstance(item, str) and len(item) > MAX_STRING for item in values):
             raise ApiError("invalid_params", MSG_DOMAIN)
 
-    @staticmethod
-    def _x2many_term(name, operator, operand):
+    def _x2many_term(self, comodel, name, operator, operand):
         """Rewrite a condition on a one2many or many2many field with ``any``.
 
         Odoo applies the related model's record rules to ``any`` / ``not any``
@@ -399,13 +406,27 @@ class O3pMcpApi(models.AbstractModel):
                 return [name, "not any" if operator == "=" else "any", []]
             if type(operand) is int and operand > 0:
                 return [name, "any" if operator == "=" else "not any", [["id", "=", operand]]]
-        if operator in LIKE_OPERATORS and isinstance(operand, str) and len(operand) <= MAX_STRING:
-            return [
-                name,
-                "not any" if operator.startswith("not ") else "any",
-                [["display_name", LIKE_OPERATORS[operator], operand]],
-            ]
+        if operator in LIKE_OPERATORS and isinstance(operand, str):
+            return self._display_name_term(comodel, name, operator, operand)
         raise ApiError("invalid_params", MSG_DOMAIN)
+
+    def _display_name_term(self, comodel, name, operator, operand):
+        """Match the related records of field ``name`` by display name.
+
+        The related model's record rules apply through ``any``; the display
+        name must be filterable on it (a model hiding data on read does not
+        allow it).
+        """
+        if (
+            len(operand) > MAX_STRING
+            or "display_name" not in self._filterable_fields(comodel)
+        ):
+            raise ApiError("invalid_params", MSG_DOMAIN)
+        return [
+            name,
+            "not any" if operator.startswith("not ") else "any",
+            [["display_name", LIKE_OPERATORS[operator], operand]],
+        ]
 
     def _term(self, model, names, operator, operand, depth):
         """Return the checked domain term for the field path ``names``.
@@ -415,7 +436,7 @@ class O3pMcpApi(models.AbstractModel):
         related model's record rules apply; conditions on one2many and
         many2many fields are rewritten by ``_x2many_term``.
         """
-        field = self._readable_fields(model).get(names[0])
+        field = self._filterable_fields(model).get(names[0])
         if field is None:
             raise ApiError("invalid_params", MSG_DOMAIN)
         if len(names) > 1:
@@ -425,8 +446,8 @@ class O3pMcpApi(models.AbstractModel):
             comodel = self._comodel(model, field)
             return [field.name, operator, self._domain_terms(comodel, operand, depth + 1)]
         if field.type in X2MANY_TYPES:
-            self._comodel(model, field)
-            return self._x2many_term(field.name, operator, operand)
+            comodel = self._comodel(model, field)
+            return self._x2many_term(comodel, field.name, operator, operand)
         self._check_operand(operand)
         return [field.name, operator, operand]
 
@@ -483,7 +504,7 @@ class O3pMcpApi(models.AbstractModel):
             return None
         if not isinstance(value, str) or not value.strip() or len(value) > MAX_STRING:
             raise ApiError("invalid_params", MSG_ORDER)
-        readable = self._readable_fields(model)
+        readable = self._filterable_fields(model)
         items = []
         for item in value.split(","):
             match = ORDER_ITEM_RE.fullmatch(item.strip())
@@ -500,7 +521,7 @@ class O3pMcpApi(models.AbstractModel):
             or not all(isinstance(spec, str) for spec in value)
         ):
             raise ApiError("invalid_params", MSG_GROUPBY)
-        readable = self._readable_fields(model)
+        readable = self._filterable_fields(model)
         for spec in value:
             match = GROUPBY_RE.fullmatch(spec)
             field = match and readable.get(match.group(1))
@@ -522,7 +543,7 @@ class O3pMcpApi(models.AbstractModel):
             or not all(isinstance(spec, str) for spec in value)
         ):
             raise ApiError("invalid_params", MSG_AGGREGATES)
-        readable = self._readable_fields(model)
+        readable = self._filterable_fields(model)
         for spec in value:
             if spec == "__count":
                 continue
@@ -552,6 +573,26 @@ class O3pMcpApi(models.AbstractModel):
                 raise ApiError("invalid_params", MSG_GROUP_ORDER)
             items.append(f"{match.group(1)} {(match.group(2) or 'asc').lower()}")
         return ", ".join(items)
+
+    @api.model
+    @ormcache("name")
+    def _model_hides_on_read(self, name):
+        """Tell whether model ``name`` hides data in a read override."""
+        return name not in READ_OVERRIDES_REVIEWED and overrides_read(type(self.env[name]))
+
+    def _filterable_fields(self, model):
+        """Return the fields of ``model`` the user may filter, sort and group on.
+
+        These are the readable fields, except for a model that hides data in
+        a read override: only ``id`` and the fields it declares public.
+        """
+        readable = self._readable_fields(model)
+        if not self._model_hides_on_read(model._name):
+            return readable
+        public = {"id"}
+        if hasattr(model, "_get_public_fields"):
+            public |= set(model._get_public_fields())
+        return {name: field for name, field in readable.items() if name in public}
 
     def _model_labels(self, names):
         records = (

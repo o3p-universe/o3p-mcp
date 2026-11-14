@@ -10,7 +10,10 @@
 # again. The series is read from the addon's manifest version (18.0.x ->
 # odoo:18.0) unless ODOO_SERIES is set. The compose project is
 # "o3p-mcp-test" for 20.0 and "o3p-mcp-test<major>" otherwise, or
-# $O3P_MCP_TEST_PROJECT. Exits non-zero when the install or any test fails.
+# $O3P_MCP_TEST_PROJECT. The test database also gets the modules in
+# $O3P_MCP_TEST_MODULES (default "calendar,project", used by tests of models
+# that hide data on read and of relations that bypass access; set it empty
+# for o3p_mcp alone). Exits non-zero when the install or any test fails.
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -25,6 +28,7 @@ export ODOO_SERIES=$series
 project=o3p-mcp-test
 [ "$series" = "20.0" ] || project="o3p-mcp-test${series%%.*}"
 project=${O3P_MCP_TEST_PROJECT:-$project}
+extra=${O3P_MCP_TEST_MODULES-calendar,project}
 compose=(docker compose -p "$project" -f "$here/compose.test.yaml")
 echo "odoo:$series, compose project $project"
 log=$(mktemp)
@@ -41,7 +45,7 @@ trap cleanup EXIT
 set +e
 "${compose[@]}" run --rm --no-deps odoo odoo \
     --addons-path=/mnt/extra-addons \
-    -d o3p_mcp_test -i o3p_mcp \
+    -d o3p_mcp_test -i "o3p_mcp${extra:+,$extra}" \
     --test-enable --test-tags "$tags" \
     --stop-after-init 2>&1 | tee "$log"
 status=${PIPESTATUS[0]}
