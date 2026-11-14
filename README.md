@@ -256,9 +256,18 @@ part, or a parameter the operation does not take, is refused with
 - `domain` is a JSON domain list (`["&", ["name", "ilike", "x"], …]`) parsed
   by Odoo's domain machinery. Every field path is checked hop by hop:
   readable and not hidden; every hop but the last a relational field to a
-  model the user may read, whose searches apply that model's rules; at most
-  4 hops. `any` / `not any` sub-domains are checked against the related
-  model. Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `=?`, `in`, `not in`,
+  model whose searches apply that model's rules; at most 4 hops. A relation
+  to a model the user may not read is refused with `access_denied`. `any` /
+  `not any` sub-domains are checked against the related model.
+- Conditions on one2many and many2many fields are rewritten to the `any` /
+  `not any` form, because Odoo applies the related model's record rules only
+  there: `["child_ids", "in", [7]]` becomes
+  `["child_ids", "any", [["id", "in", [7]]]]`, `= 7` and `!= 7` work the same
+  way, `= false` becomes `not any []`, `!= false` becomes `any []`, and
+  `ilike`-style operators match the related records' display name. Forms
+  without a faithful rewrite (`child_of`, `parent_of`, comparisons, `=?`,
+  lists holding `false`) are refused. Paths are expanded the same way,
+  `a.b` into `["a", "any", [["b", …]]]`, as Odoo itself does. Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `=?`, `in`, `not in`,
   `like`, `not like`, `ilike`, `not ilike`, `=like`, `=ilike`, `child_of`,
   `parent_of`, `any`, `not any`. Values are JSON scalars or lists of
   scalars.

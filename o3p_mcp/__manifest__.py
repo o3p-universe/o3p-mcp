@@ -6,7 +6,7 @@
         "and introspects OAuth 2.1 access tokens whose scopes follow the user's "
         "MCP groups."
     ),
-    "version": "20.0.1.22.0",
+    "version": "20.0.1.23.0",
     "category": "Technical",
     "author": "O3P",
     "website": "https://github.com/o3p-universe/o3p-mcp",

@@ -53,6 +53,16 @@ NUMERIC_TYPES = frozenset({"integer", "float", "monetary"})
 NUMERIC_AGGREGATES = frozenset({"sum", "avg", "min", "max"})
 COUNT_AGGREGATES = frozenset({"count", "count_distinct"})
 DATE_GRANULARITIES = frozenset({"day", "week", "month", "quarter", "year"})
+X2MANY_TYPES = frozenset({"one2many", "many2many"})
+# Like operators on an x2many field match the related records' display name.
+LIKE_OPERATORS = {
+    "like": "like",
+    "ilike": "ilike",
+    "=like": "=like",
+    "=ilike": "=ilike",
+    "not like": "like",
+    "not ilike": "ilike",
+}
 
 MSG_FIELDS = "A requested field is unknown, hidden or not readable."
 MSG_DOMAIN = (
@@ -322,35 +332,22 @@ class O3pMcpApi(models.AbstractModel):
             raise ApiError("invalid_params", MSG_FIELDS)
         return list(dict.fromkeys(value))
 
-    def _path_model(self, model, path, relational_end=False):
-        """Check a field path such as ``partner_id.country_id.code``.
+    def _comodel(self, model, field):
+        """Return the model ``field`` relates to, as the user, or raise.
 
-        Every hop must be a readable, non-hidden field; every hop but the last
-        (and the last too with ``relational_end``) a relational field to a
-        model the user may read, whose search applies that model's rules.
-        Returns the model the path ends on.
+        The related model must be exposed and searched with its own access
+        rules; the user must be allowed to read it.
         """
-        names = path.split(".") if isinstance(path, str) else []
-        if not 0 < len(names) <= MAX_PATH_HOPS or not all(
-            FIELD_NAME_RE.fullmatch(name) for name in names
+        if (
+            not field.relational
+            or field.bypass_search_access
+            or not self._exposed_model(field.comodel_name)
         ):
             raise ApiError("invalid_params", MSG_DOMAIN)
-        current = model
-        for index, name in enumerate(names):
-            field = self._readable_fields(current).get(name)
-            if field is None:
-                raise ApiError("invalid_params", MSG_DOMAIN)
-            if index == len(names) - 1 and not relational_end:
-                break
-            if (
-                not field.relational
-                or field.bypass_search_access
-                or not self._exposed_model(field.comodel_name)
-                or not current.env[field.comodel_name].has_access("read")
-            ):
-                raise ApiError("invalid_params", MSG_DOMAIN)
-            current = current.env[field.comodel_name]
-        return current
+        comodel = model.env[field.comodel_name]
+        if not comodel.has_access("read"):
+            raise ApiError("access_denied")
+        return comodel
 
     @staticmethod
     def _check_operand(value):
@@ -366,13 +363,58 @@ class O3pMcpApi(models.AbstractModel):
         if any(isinstance(item, str) and len(item) > MAX_STRING for item in values):
             raise ApiError("invalid_params", MSG_DOMAIN)
 
-    def _domain_param(self, model, value, depth=0):
-        """Return ``value`` as a domain after checking every condition.
+    @staticmethod
+    def _x2many_term(name, operator, operand):
+        """Rewrite a condition on a one2many or many2many field with ``any``.
 
-        The structure is parsed by Odoo's own domain machinery; each field
-        path, including those inside ``any`` / ``not any`` sub-domains, is
-        checked as the user.
+        Odoo applies the related model's record rules to ``any`` / ``not any``
+        but not to the short forms (``in`` ids, ``=`` id, ``!= False``…), which
+        would reveal hidden related records. Forms without a faithful
+        rewrite (``child_of``, ``parent_of``, comparisons, ``=?``) are refused.
         """
+        if operator in ("in", "not in"):
+            ids = operand if isinstance(operand, list) else [operand]
+            if len(ids) > MAX_VALUES or not all(type(item) is int and item > 0 for item in ids):
+                raise ApiError("invalid_params", MSG_DOMAIN)
+            return [name, "any" if operator == "in" else "not any", [["id", "in", ids]]]
+        if operator in ("=", "!="):
+            if operand is False or operand is None:
+                return [name, "not any" if operator == "=" else "any", []]
+            if type(operand) is int and operand > 0:
+                return [name, "any" if operator == "=" else "not any", [["id", "=", operand]]]
+        if operator in LIKE_OPERATORS and isinstance(operand, str) and len(operand) <= MAX_STRING:
+            return [
+                name,
+                "not any" if operator.startswith("not ") else "any",
+                [["display_name", LIKE_OPERATORS[operator], operand]],
+            ]
+        raise ApiError("invalid_params", MSG_DOMAIN)
+
+    def _term(self, model, names, operator, operand, depth):
+        """Return the checked domain term for the field path ``names``.
+
+        Every hop must be a readable, non-hidden field. A relational hop
+        becomes an ``any`` sub-domain, as Odoo itself expands paths, so the
+        related model's record rules apply; conditions on one2many and
+        many2many fields are rewritten by ``_x2many_term``.
+        """
+        field = self._readable_fields(model).get(names[0])
+        if field is None:
+            raise ApiError("invalid_params", MSG_DOMAIN)
+        if len(names) > 1:
+            comodel = self._comodel(model, field)
+            return [field.name, "any", [self._term(comodel, names[1:], operator, operand, depth)]]
+        if operator in ("any", "not any"):
+            comodel = self._comodel(model, field)
+            return [field.name, operator, self._domain_terms(comodel, operand, depth + 1)]
+        if field.type in X2MANY_TYPES:
+            self._comodel(model, field)
+            return self._x2many_term(field.name, operator, operand)
+        self._check_operand(operand)
+        return [field.name, operator, operand]
+
+    def _domain_terms(self, model, value, depth=0):
+        """Return the checked and rewritten terms of the domain ``value``."""
         if value is None:
             value = []
         if (
@@ -381,22 +423,33 @@ class O3pMcpApi(models.AbstractModel):
             or depth > MAX_DOMAIN_DEPTH
         ):
             raise ApiError("invalid_params", MSG_DOMAIN)
+        terms = []
         for item in value:
             if item in ("&", "|", "!"):
+                terms.append(item)
                 continue
             if not isinstance(item, list) or len(item) != 3:
                 raise ApiError("invalid_params", MSG_DOMAIN)
             path, operator, operand = item
-            if not isinstance(operator, str) or operator not in OPERATORS:
+            names = path.split(".") if isinstance(path, str) else []
+            if (
+                not isinstance(operator, str)
+                or operator not in OPERATORS
+                or not 0 < len(names) <= MAX_PATH_HOPS
+                or not all(FIELD_NAME_RE.fullmatch(name) for name in names)
+            ):
                 raise ApiError("invalid_params", MSG_DOMAIN)
-            if operator in ("any", "not any"):
-                comodel = self._path_model(model, path, relational_end=True)
-                self._domain_param(comodel, operand, depth + 1)
-            else:
-                self._path_model(model, path)
-                self._check_operand(operand)
+            terms.append(self._term(model, names, operator, operand, depth))
+        return terms
+
+    def _domain_param(self, model, value):
+        """Return ``value`` as a domain checked and rewritten as the user.
+
+        The structure is then parsed by Odoo's own domain machinery.
+        """
+        terms = self._domain_terms(model, value)
         try:
-            return Domain(value)
+            return Domain(terms)
         except (ValueError, TypeError) as exc:
             raise ApiError("invalid_params", MSG_DOMAIN) from exc
 
