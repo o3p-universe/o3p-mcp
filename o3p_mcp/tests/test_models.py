@@ -2,7 +2,7 @@ import hashlib
 from datetime import timedelta, timezone
 from unittest.mock import patch
 
-from odoo import fields
+from odoo import Command, fields
 from odoo.exceptions import ValidationError
 from odoo.tests import TransactionCase, tagged
 
@@ -188,6 +188,19 @@ class TestTokens(O3pMcpCommon, TransactionCase):
         self.assertOAuthError(
             "invalid_grant", self.Token._rotate, response["refresh_token"], self.client
         )
+
+    def test_user_turned_portal_is_inactive(self):
+        _token, response = self.issue()
+        self.editor.write(
+            {
+                "group_ids": [
+                    Command.unlink(self.env.ref("base.group_user").id),
+                    Command.link(self.env.ref("base.group_portal").id),
+                ]
+            }
+        )
+        self.assertTrue(self.editor.share)
+        self.assertEqual(self.Token._introspect(response["access_token"]), INACTIVE)
 
     def test_removed_groups_drop_the_scope(self):
         _token, response = self.issue()

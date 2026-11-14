@@ -288,10 +288,11 @@ class O3pMcpOauth(models.AbstractModel):
         """Return the scopes ``user`` may hold now, from its state and groups.
 
         ``okf.read`` is required for every call, so a user without it gets no
-        scope at all.
+        scope at all. Only active internal users qualify: portal and public
+        users (``share``) get nothing, whatever their groups.
         """
         user = user.sudo()
-        if not user or not user.active or user._is_public():
+        if not user or not user.active or user.share:
             return set()
         scopes = {
             scope for scope, group in SCOPE_GROUPS.items() if user.has_group(group)

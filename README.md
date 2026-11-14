@@ -14,8 +14,9 @@ The addon adds an **MCP** privilege with two groups:
 | MCP / Editor (implies User) | `okf.read`, `okf.write` |
 
 `okf.read` is required for any MCP call; `okf.write` enables live write tools.
-Archived users, the public user and users without the User group hold no
-scope.
+Only active internal users hold scopes: archived users, portal and public
+users (even when placed in an MCP group) and users without the User group
+hold none.
 
 ## Clients, codes and tokens
 

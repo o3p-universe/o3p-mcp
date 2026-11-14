@@ -35,5 +35,15 @@ class TestInstall(O3pMcpCommon, TransactionCase):
     def test_scopes_need_an_active_internal_user(self):
         oauth = self.env["o3p.mcp.oauth"]
         self.assertEqual(oauth._scopes_for_user(self.env.ref("base.public_user")), set())
+        # Review probe: a portal user placed in the MCP groups.
+        portal = new_test_user(
+            self.env,
+            "o3p_mcp_portal",
+            groups="base.group_portal,o3p_mcp.group_mcp_editor",
+            name="Portal User",
+        )
+        self.assertTrue(portal.share)
+        self.assertTrue(portal.has_group("o3p_mcp.group_mcp_user"))
+        self.assertEqual(oauth._scopes_for_user(portal), set())
         self.editor.active = False
         self.assertEqual(oauth._scopes_for_user(self.editor), set())

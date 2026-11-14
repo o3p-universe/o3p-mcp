@@ -1,7 +1,7 @@
 import hashlib
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
-from odoo.tests import tagged
+from odoo.tests import new_test_user, tagged
 
 from .common import AUTHORIZE_URL, REDIRECT_URI, RESOURCE, O3pMcpHttpCase, location_of
 
@@ -121,6 +121,16 @@ class TestAuthorize(O3pMcpHttpCase):
         response = self.get_consent()
         self.assertErrorPage(response, status=403)
         self.assertIn("error=access_denied", response.text)
+
+    def test_portal_user_in_mcp_group_is_refused(self):
+        new_test_user(
+            self.env,
+            "o3p_mcp_portal",
+            groups="base.group_portal,o3p_mcp.group_mcp_user",
+            name="Portal User",
+        )
+        self.authenticate("o3p_mcp_portal", "o3p_mcp_portal")
+        self.assertErrorPage(self.get_consent(), status=403)
 
     def test_user_without_mcp_group_is_never_redirected(self):
         # Review probe: a self-registered client sending a plain user straight
