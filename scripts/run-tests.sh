@@ -4,12 +4,13 @@
 # Usage: [ODOO_SERIES=18.0] scripts/run-tests.sh [TEST_TAGS]
 #        (default tags: /o3p_mcp)
 #
-# Starts PostgreSQL 17 and the odoo:<series> image with docker compose, runs
-# the tests once and removes the containers and volumes again. The series is
-# read from the addon's manifest version (18.0.x -> odoo:18.0) unless
-# ODOO_SERIES is set. The compose project is "o3p-mcp-test" for 20.0 and
-# "o3p-mcp-test<major>" otherwise. Exits non-zero when the install or any
-# test fails.
+# Starts PostgreSQL 17, a second PostgreSQL 17 instance as the SQL sandbox
+# and the odoo:<series> image with pglast added (built on first use) with
+# docker compose, runs the tests once and removes the containers and volumes
+# again. The series is read from the addon's manifest version (18.0.x ->
+# odoo:18.0) unless ODOO_SERIES is set. The compose project is
+# "o3p-mcp-test" for 20.0 and "o3p-mcp-test<major>" otherwise, or
+# $O3P_MCP_TEST_PROJECT. Exits non-zero when the install or any test fails.
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -23,6 +24,7 @@ fi
 export ODOO_SERIES=$series
 project=o3p-mcp-test
 [ "$series" = "20.0" ] || project="o3p-mcp-test${series%%.*}"
+project=${O3P_MCP_TEST_PROJECT:-$project}
 compose=(docker compose -p "$project" -f "$here/compose.test.yaml")
 echo "odoo:$series, compose project $project"
 log=$(mktemp)
@@ -33,7 +35,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-"${compose[@]}" up -d --wait db >/dev/null
+"${compose[@]}" build --quiet odoo
+"${compose[@]}" up -d --wait db sandbox >/dev/null
 
 set +e
 "${compose[@]}" run --rm --no-deps odoo odoo \

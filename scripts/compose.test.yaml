@@ -1,6 +1,7 @@
-# Test stack for scripts/run-tests.sh: PostgreSQL 17 and the Odoo series in
-# ODOO_SERIES (set by the script) with this repository mounted read-only as an
-# addons path.
+# Test stack for scripts/run-tests.sh: PostgreSQL 17 for Odoo, a separate
+# PostgreSQL 17 instance as the SQL sandbox, and the Odoo series in
+# ODOO_SERIES (set by the script, plus pglast) with this repository mounted
+# read-only as an addons path.
 services:
   db:
     image: postgres:17
@@ -16,16 +17,51 @@ services:
       timeout: 5s
       retries: 30
 
+  # The SQL sandbox: its own instance, an empty database and powerless roles
+  # (scripts/sandbox-setup.sql). Odoo's database is not on it.
+  sandbox:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: sandbox_admin
+      POSTGRES_PASSWORD: sandbox-admin-test
+      POSTGRES_DB: postgres
+      O3P_SQL_PASSWORD: ${O3P_SQL_PASSWORD:-o3p-sql-test}
+      O3P_SQL_ROLES: "4"
+    command: ["postgres", "-c", "shared_buffers=64MB", "-c", "max_connections=30"]
+    tmpfs:
+      - /var/lib/postgresql/data
+    volumes:
+      - ./sandbox-init.sh:/docker-entrypoint-initdb.d/o3p-sandbox.sh:ro
+      - ./sandbox-setup.sql:/o3p/sandbox-setup.sql:ro
+    security_opt:
+      - label:disable
+    healthcheck:
+      # Healthy once the init script has created the roles (the image
+      # restarts the server after running it).
+      test: ["CMD-SHELL", "pg_isready -U sandbox_admin -d o3p_sqlbox -h 127.0.0.1"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
   odoo:
-    image: odoo:${ODOO_SERIES:-20.0}
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+      args:
+        ODOO_SERIES: ${ODOO_SERIES:-20.0}
+    image: o3p-mcp-test-odoo:${ODOO_SERIES:-20.0}
     depends_on:
       db:
+        condition: service_healthy
+      sandbox:
         condition: service_healthy
     environment:
       HOST: db
       USER: odoo
       PASSWORD: odoo
       PYTHONDONTWRITEBYTECODE: "1"
+      O3P_SQL_PASSWORD: ${O3P_SQL_PASSWORD:-o3p-sql-test}
+      O3P_SQL_TEST_HOST: sandbox
     volumes:
       - ..:/mnt/extra-addons:ro
     # Read the bind mount without relabelling the host files (SELinux hosts).

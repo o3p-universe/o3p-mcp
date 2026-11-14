@@ -1,0 +1,7 @@
+# The Odoo series under test with the Python packages o3p_mcp declares, for
+# scripts/run-tests.sh.
+ARG ODOO_SERIES=20.0
+FROM odoo:${ODOO_SERIES}
+USER root
+RUN pip install --no-cache-dir --break-system-packages pglast==8.8
+USER odoo
