@@ -18,6 +18,7 @@ so queries of different users cannot see or signal each other's sessions.
 
 import datetime
 import decimal
+import ipaddress
 import logging
 import math
 import os
@@ -52,7 +53,11 @@ PASSWORD_CONFIG_KEY = "o3p_sql_password"
 DEFAULT_SQL_PORT = 5432
 DEFAULT_SQL_DATABASE = "o3p_sqlbox"
 DEFAULT_SQL_USER = "o3p_sqlbox"
-DEFAULT_SQL_SSLMODE = "prefer"
+# The sandbox connection's libpq sslmode. "auto" (the default) means
+# "prefer" for a sandbox on this host (see sandbox_is_local) and
+# "verify-full" anywhere else, where TLS must not be strippable.
+SSL_AUTO = "auto"
+DEFAULT_SQL_SSLMODE = SSL_AUTO
 SSL_MODES = ("disable", "allow", "prefer", "require", "verify-ca", "verify-full")
 DEFAULT_SQL_ROLES = 4
 DEFAULT_SQL_USER_CONCURRENCY = 2
@@ -102,6 +107,30 @@ MSG_SANDBOX_DOWN = "The SQL sandbox could not be reached."
 def sql_password():
     """The sandbox password: environment first, then odoo.conf; never stored."""
     return os.environ.get(PASSWORD_ENV) or config.get(PASSWORD_CONFIG_KEY) or ""
+
+
+def sandbox_is_local(host):
+    """Tell whether ``host`` names a sandbox on this host.
+
+    Local: a unix socket directory, ``localhost``, a loopback address, or a
+    single-label name such as a Docker or Compose service name (``sandbox``),
+    which Docker resolves on the host's own bridge network. Anything else (a
+    dotted name, another address) is a remote host.
+    """
+    host = (host or "").strip()
+    if not host or host.startswith("/") or host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host.strip("[]")).is_loopback
+    except ValueError:
+        return "." not in host and ":" not in host
+
+
+def effective_sslmode(host, configured):
+    """The sslmode to use: the configured one, or the default for ``host``."""
+    if configured in SSL_MODES:
+        return configured
+    return "prefer" if sandbox_is_local(host) else "verify-full"
 
 
 def gate_error(sqlstate, message, position=None):
@@ -292,13 +321,16 @@ class O3pMcpApiSql(models.AbstractModel):
             value = params.get_int(key, default)
             return value if value > 0 else default
 
-        sslmode = params.get_str("o3p_mcp.sql_sslmode", DEFAULT_SQL_SSLMODE)
+        host = params.get_str("o3p_mcp.sql_host", "").strip()
+        configured = params.get_str("o3p_mcp.sql_sslmode", DEFAULT_SQL_SSLMODE)
         return {
-            "host": params.get_str("o3p_mcp.sql_host", "").strip(),
+            "host": host,
             "port": positive("o3p_mcp.sql_port", DEFAULT_SQL_PORT),
             "database": params.get_str("o3p_mcp.sql_database", "").strip() or DEFAULT_SQL_DATABASE,
             "user": params.get_str("o3p_mcp.sql_user", "").strip() or DEFAULT_SQL_USER,
-            "sslmode": sslmode if sslmode in SSL_MODES else DEFAULT_SQL_SSLMODE,
+            "sslmode_setting": configured if configured in SSL_MODES else SSL_AUTO,
+            "sslmode": effective_sslmode(host, configured),
+            "sslrootcert": params.get_str("o3p_mcp.sql_sslrootcert", "").strip(),
             "roles": positive("o3p_mcp.sql_roles", DEFAULT_SQL_ROLES),
             "user_concurrency": min(
                 positive("o3p_mcp.sql_user_concurrency", DEFAULT_SQL_USER_CONCURRENCY), MAX_USER_SLOTS
@@ -317,6 +349,7 @@ class O3pMcpApiSql(models.AbstractModel):
             "user": f"{settings['user']}_{slot}",
             "password": sql_password(),
             "sslmode": settings["sslmode"],
+            **({"sslrootcert": settings["sslrootcert"]} if settings.get("sslrootcert") else {}),
             "connect_timeout": CONNECT_TIMEOUT,
             "application_name": "o3p_mcp",
             "options": f"-c statement_timeout={int(timeout_ms)} "
@@ -730,7 +763,9 @@ class O3pMcpApiSql(models.AbstractModel):
     def _sql_check(self):
         """Connect as every sandbox role and verify it can do nothing else.
 
-        Returns ``(ok, lines)``. Each role must log in to the sandbox database
+        Returns ``(level, lines)``, level ``success``, ``warning`` (the sandbox
+        is remote and its connection not verify-full) or ``danger``. Each
+        role must log in to the sandbox database
         and nowhere else, hold no attribute, membership or privilege beyond
         CONNECT and TEMPORARY there, find no relation, extension or file
         function it could use, and fail to log in to Odoo's own database.
@@ -740,8 +775,9 @@ class O3pMcpApiSql(models.AbstractModel):
         _ = self.env._
         settings = self._sql_settings()
         if not settings["host"]:
-            return False, [_("Set the sandbox host first.")]
+            return "danger", [_("Set the sandbox host first.")]
         problems, notes = [], []
+        warnings = self._sql_transport_warnings(settings)
         if parse_sql is None:
             problems.append(_("The Python package pglast is not installed."))
         if not sql_password():
@@ -752,7 +788,7 @@ class O3pMcpApiSql(models.AbstractModel):
                     key=PASSWORD_CONFIG_KEY,
                 )
             )
-            return False, problems
+            return "danger", problems + warnings
         odoo_db = self.env.cr.dbname
         for slot in range(1, settings["roles"] + 1):
             role = f"{settings['user']}_{slot}"
@@ -771,7 +807,7 @@ class O3pMcpApiSql(models.AbstractModel):
             if self._sql_can_reach_odoo(role):
                 problems.append(_("%(role)s can log in to the Odoo database %(db)s.", role=role, db=odoo_db))
         if problems:
-            return False, problems
+            return "danger", problems + warnings
         lines = [
             _(
                 "%(count)s sandbox roles %(user)s_1…%(user)s_%(count)s on %(host)s:%(port)s/%(db)s: "
@@ -783,7 +819,20 @@ class O3pMcpApiSql(models.AbstractModel):
                 db=settings["database"],
             )
         ]
-        return True, lines + sorted(set(notes))
+        return ("warning" if warnings else "success"), warnings + lines + sorted(set(notes))
+
+    def _sql_transport_warnings(self, settings):
+        """A remote sandbox must be reached with sslmode verify-full."""
+        if sandbox_is_local(settings["host"]) or settings["sslmode"] == "verify-full":
+            return []
+        return [
+            self.env._(
+                "The sandbox %(host)s is not on this host and its connection uses sslmode %(mode)s: "
+                "copied rows can be read or changed on the network. Use verify-full.",
+                host=settings["host"],
+                mode=settings["sslmode"],
+            )
+        ]
 
     def _sql_check_role(self, connection, odoo_db, notes):
         _ = self.env._
@@ -863,6 +912,13 @@ class O3pMcpApiSql(models.AbstractModel):
         if functions:
             problems.append(_("the role may run %(names)s.", names=functions))
         cursor.execute("CREATE TEMPORARY TABLE o3p_mcp_check (x integer) ON COMMIT DROP")
+        cursor.execute("SELECT ssl, version FROM pg_stat_ssl WHERE pid = pg_backend_pid()")
+        ssl, version = cursor.fetchone() or (False, None)
+        notes.append(
+            _("The sandbox connections are encrypted (%(version)s).", version=version)
+            if ssl
+            else _("The sandbox connections are not encrypted.")
+        )
         if value("SELECT current_setting('temp_file_limit')") == "-1":
             notes.append(_("temp_file_limit is unlimited for the sandbox roles; consider ALTER ROLE … SET temp_file_limit."))
         return problems

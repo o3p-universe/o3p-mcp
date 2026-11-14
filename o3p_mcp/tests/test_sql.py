@@ -1,5 +1,6 @@
 import json
 import resource
+import socket
 import time
 from unittest.mock import patch
 
@@ -254,19 +255,74 @@ class TestSqlLimits(O3pMcpSqlCase):
 @tagged("post_install", "-at_install")
 class TestSqlSandboxSetup(O3pMcpSqlCase):
     def test_settings_check_passes(self):
-        ok, lines = self.env["o3p.mcp.api"]._sql_check()
-        self.assertTrue(ok, lines)
+        level, lines = self.env["o3p.mcp.api"]._sql_check()
+        self.assertEqual(level, "success", lines)
+        self.assertIn("The sandbox connections are not encrypted.", lines)
         settings = self.env["res.config.settings"].create({})
         action = settings.action_o3p_mcp_check_sql()
         self.assertEqual(action["params"]["type"], "success", action["params"]["message"])
 
     def test_settings_check_reports_problems(self):
         with patch.object(api_sql, "sql_password", return_value="wrong"):
-            ok, lines = self.env["o3p.mcp.api"]._sql_check()
-        self.assertFalse(ok)
+            level, lines = self.env["o3p.mcp.api"]._sql_check()
+        self.assertEqual(level, "danger")
         self.assertIn("o3p_sqlbox_1 cannot log in", lines[0])
         self.env["ir.config_parameter"].sudo().set_str("o3p_mcp.sql_host", "")
-        self.assertFalse(self.env["o3p.mcp.api"]._sql_check()[0])
+        self.assertEqual(self.env["o3p.mcp.api"]._sql_check()[0], "danger")
+
+    def test_sslmode_default_follows_the_host(self):
+        for host, local in (
+            ("sandbox", True),
+            ("o3p-sql-sandbox", True),
+            ("localhost", True),
+            ("127.0.0.1", True),
+            ("127.8.9.10", True),
+            ("::1", True),
+            ("[::1]", True),
+            ("/var/run/postgresql", True),
+            ("sandbox.internal", False),
+            ("db.example.com", False),
+            ("10.0.0.5", False),
+            ("172.18.0.3", False),
+            ("fd00::5", False),
+        ):
+            with self.subTest(host=host):
+                self.assertEqual(api_sql.sandbox_is_local(host), local)
+                self.assertEqual(api_sql.effective_sslmode(host, "auto"), "prefer" if local else "verify-full")
+                self.assertEqual(api_sql.effective_sslmode(host, "require"), "require")
+        params = self.env["ir.config_parameter"].sudo()
+        Api = self.env["o3p.mcp.api"]
+        self.assertEqual(Api._sql_settings()["sslmode"], "prefer")
+        params.set_str("o3p_mcp.sql_host", "sql.example.com")
+        self.assertEqual(Api._sql_settings()["sslmode"], "verify-full")
+        params.set_str("o3p_mcp.sql_sslmode", "require")
+        params.set_str("o3p_mcp.sql_sslrootcert", "system")
+        settings = Api._sql_settings()
+        self.assertEqual((settings["sslmode"], settings["sslrootcert"]), ("require", "system"))
+        with patch.object(api_sql.psycopg2, "connect") as connect:
+            Api._sql_connect(settings, 1, 1000)
+        self.assertEqual(
+            (connect.call_args.kwargs["sslmode"], connect.call_args.kwargs["sslrootcert"]),
+            ("require", "system"),
+        )
+
+    def test_settings_check_warns_about_a_remote_sandbox_without_verify_full(self):
+        # The same sandbox by its address counts as remote.
+        address = socket.gethostbyname(self.sandbox_host)
+        params = self.env["ir.config_parameter"].sudo()
+        params.set_str("o3p_mcp.sql_host", address)
+        params.set_str("o3p_mcp.sql_sslmode", "prefer")
+        level, lines = self.env["o3p.mcp.api"]._sql_check()
+        self.assertEqual(level, "warning", lines)
+        self.assertIn("Use verify-full", lines[0])
+        action = self.env["res.config.settings"].create({}).action_o3p_mcp_check_sql()
+        self.assertEqual(action["params"]["type"], "warning")
+        # The default for a remote sandbox is verify-full, which this test
+        # sandbox (no TLS) refuses: the check reports it.
+        params.set_str("o3p_mcp.sql_sslmode", "auto")
+        level, lines = self.env["o3p.mcp.api"]._sql_check()
+        self.assertEqual(level, "danger", lines)
+        self.assertEqual(self.env["o3p.mcp.api"]._sql_settings()["sslmode"], "verify-full")
 
     def test_settings_round_trip_and_validation(self):
         Settings = self.env["res.config.settings"]

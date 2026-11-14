@@ -23,6 +23,7 @@ from .api_sql import (
     MAX_USER_SLOTS,
     PASSWORD_CONFIG_KEY,
     PASSWORD_ENV,
+    SSL_AUTO,
     SSL_MODES,
 )
 from .oauth import (
@@ -144,7 +145,18 @@ class ResConfigSettings(models.TransientModel):
         help="How many SQL queries may run at once, over all users.",
     )
     o3p_mcp_sql_sslmode = fields.Selection(
-        [(mode, mode) for mode in SSL_MODES], string="Sandbox SSL mode", default=DEFAULT_SQL_SSLMODE
+        [(SSL_AUTO, "automatic: prefer on this host, verify-full elsewhere")]
+        + [(mode, mode) for mode in SSL_MODES],
+        string="Sandbox SSL mode",
+        default=DEFAULT_SQL_SSLMODE,
+        help="libpq sslmode of the sandbox connections. Automatic uses prefer for a "
+        "sandbox on this host (unix socket, localhost, loopback address, or a "
+        "single-label Docker service name) and verify-full anywhere else.",
+    )
+    o3p_mcp_sql_sslrootcert = fields.Char(
+        string="Sandbox CA certificates",
+        help="libpq sslrootcert for verify-ca and verify-full: a file of CA "
+        "certificates, or 'system' for the system's CA store. Empty: libpq's default.",
     )
     o3p_mcp_sql_user_concurrency = fields.Integer(
         string="SQL queries per user", default=DEFAULT_SQL_USER_CONCURRENCY
@@ -236,7 +248,8 @@ class ResConfigSettings(models.TransientModel):
             o3p_mcp_sql_database=sql["database"],
             o3p_mcp_sql_user=sql["user"],
             o3p_mcp_sql_roles=sql["roles"],
-            o3p_mcp_sql_sslmode=sql["sslmode"],
+            o3p_mcp_sql_sslmode=sql["sslmode_setting"],
+            o3p_mcp_sql_sslrootcert=sql["sslrootcert"],
             o3p_mcp_sql_user_concurrency=sql["user_concurrency"],
             o3p_mcp_sql_max_rows=sql["max_rows"],
             o3p_mcp_sql_max_copy_mb=sql["max_copy_bytes"] // 1_000_000,
@@ -316,6 +329,7 @@ class ResConfigSettings(models.TransientModel):
         params.set_str("o3p_mcp.sql_user", self.o3p_mcp_sql_user.strip())
         params.set_int("o3p_mcp.sql_roles", self.o3p_mcp_sql_roles)
         params.set_str("o3p_mcp.sql_sslmode", self.o3p_mcp_sql_sslmode or DEFAULT_SQL_SSLMODE)
+        params.set_str("o3p_mcp.sql_sslrootcert", (self.o3p_mcp_sql_sslrootcert or "").strip())
         params.set_int("o3p_mcp.sql_user_concurrency", self.o3p_mcp_sql_user_concurrency)
         params.set_int("o3p_mcp.sql_max_rows", self.o3p_mcp_sql_max_rows)
         params.set_int("o3p_mcp.sql_max_copy_bytes", self.o3p_mcp_sql_max_copy_mb * 1_000_000)
@@ -336,6 +350,9 @@ class ResConfigSettings(models.TransientModel):
                 raise UserError(
                     _("The %(label)s must be a lowercase PostgreSQL name (letters, digits, _).", label=label)
                 )
+        rootcert = (self.o3p_mcp_sql_sslrootcert or "").strip()
+        if len(rootcert) > 4096 or any(char in rootcert for char in "\r\n\0"):
+            raise UserError(_("The sandbox CA certificates must be a file path or 'system'."))
         if not 1 <= self.o3p_mcp_sql_roles <= 100:
             raise UserError(_("The sandbox role count must be between 1 and 100."))
         if not 1 <= self.o3p_mcp_sql_user_concurrency <= MAX_USER_SLOTS:
@@ -351,12 +368,12 @@ class ResConfigSettings(models.TransientModel):
         """Connect as every sandbox role and report what it may do."""
         self.ensure_one()
         self.env["o3p.mcp.client"].check_access("write")
-        ok, lines = self.env["o3p.mcp.api"].sudo()._sql_check()
+        level, lines = self.env["o3p.mcp.api"].sudo()._sql_check()
         return notification(
             self.env._("SQL sandbox"),
             "\n".join(lines),
-            "success" if ok else "danger",
-            sticky=not ok,
+            level,
+            sticky=level != "success",
         )
 
     def action_o3p_mcp_rotate_credentials(self):
