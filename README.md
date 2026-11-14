@@ -274,8 +274,8 @@ part, or a parameter the operation does not take, is refused with
   `["child_ids", "any", [["id", "in", [7]]]]`, `= 7` and `!= 7` work the same
   way, `= false` becomes `not any []`, `!= false` becomes `any []`, and
   `ilike`-style operators match the related records' display name. Forms
-  without a faithful rewrite (`child_of`, `parent_of`, comparisons, `=?`,
-  lists holding `false`) are refused. Paths are expanded the same way,
+  without a faithful rewrite (comparisons, `=?`, lists holding `false`) are
+  refused. Paths are expanded the same way,
   `a.b` into `["a", "any", [["b", …]]]`, as Odoo itself does.
 - On a many-to-one field, record ids and `false` compare the column itself
   (`["partner_id", "=", 7]`, `["partner_id", "in", [7, false]]`). Text
@@ -286,10 +286,13 @@ part, or a parameter the operation does not take, is refused with
   access (Odoo 18's `auto_join`, such as a project's customer),
   such text conditions are refused, since Odoo would match names, e-mails or
   VAT numbers of records the user may not read; search the related model
-  first and filter on its ids. Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `=?`, `in`, `not in`,
-  `like`, `not like`, `ilike`, `not ilike`, `=like`, `=ilike`, `child_of`,
-  `parent_of`, `any`, `not any`. Values are JSON scalars or lists of
-  scalars.
+  first and filter on its ids.
+- Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `=?`, `in`, `not in`,
+  `like`, `not like`, `ilike`, `not ilike`, `=like`, `=ilike`, `any`,
+  `not any`. Values are JSON scalars or lists of scalars. `child_of` and
+  `parent_of` are refused: Odoo walks the hierarchy as superuser, through
+  records the user may not read, so their results would reveal how hidden
+  records are linked.
 - `order` is a comma-separated list of `field`, `field asc` or `field desc`
   on sortable, readable, non-hidden fields.
 - `groupby` items are groupable readable fields; date and datetime fields

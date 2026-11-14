@@ -129,3 +129,38 @@ class TestProjectCustomerProbe(O3pMcpApiCase):
         self.assertEqual(self.found([["partner_id", "ilike", "leakprobe2@secret"]]), [])
         self.assertEqual(self.found([["partner_id", "in", ["IT12345678901"]]]), [])
         self.assertEqual(self.found([["partner_id", "=", self.hidden_customer.id]]), ["MCPT Project"])
+
+
+@tagged("post_install", "-at_install")
+class TestHierarchyOperators(O3pMcpApiCase):
+    """child_of and parent_of are refused: Odoo walks hierarchies as superuser."""
+
+    def test_hidden_middle_node(self):
+        Partner = self.env["res.partner"]
+        root = Partner.create({"name": "MCPT Hidden Root"})
+        middle = Partner.create({"name": "MCPT Hidden Middle", "parent_id": root.id})
+        leaf = Partner.create(
+            {"name": "MCPT Visible Leaf", "parent_id": middle.id, "type": "other",
+             "category_id": [Command.link(self.visible.id)]}
+        )
+        for condition in (
+            ["id", "child_of", root.id],
+            ["id", "child_of", [root.id]],
+            ["parent_id", "child_of", [root.id]],
+            ["id", "parent_of", [leaf.id]],
+            ["parent_id", "parent_of", leaf.id],
+        ):
+            for user in ("restricted", "admin"):
+                with self.subTest(condition=condition, user=user):
+                    self.assertApiError(
+                        self.call("search", {"model": "res.partner", "domain": [condition], "fields": ["name"]}, user=user),
+                        "invalid_params",
+                    )
+        # The visible leaf is found by its own fields, without the hierarchy.
+        names = [
+            row["name"]
+            for row in self.result(
+                "search", {"model": "res.partner", "domain": [["id", "=", leaf.id]], "fields": ["name"]}
+            )["records"]
+        ]
+        self.assertEqual(names, ["MCPT Visible Leaf"])
