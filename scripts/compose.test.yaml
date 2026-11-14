@@ -1,5 +1,6 @@
-# Test stack for scripts/run-tests.sh: PostgreSQL 17 and Odoo 20 with this
-# repository mounted read-only as an addons path.
+# Test stack for scripts/run-tests.sh: PostgreSQL 17 and the Odoo series in
+# ODOO_SERIES (set by the script) with this repository mounted read-only as an
+# addons path.
 services:
   db:
     image: postgres:17
@@ -16,7 +17,7 @@ services:
       retries: 30
 
   odoo:
-    image: odoo:20.0
+    image: odoo:${ODOO_SERIES:-20.0}
     depends_on:
       db:
         condition: service_healthy

@@ -1,16 +1,30 @@
 #!/usr/bin/env bash
 # Install o3p_mcp in a throw-away database and run its tests.
 #
-# Usage: scripts/run-tests.sh [TEST_TAGS]     (default: /o3p_mcp)
+# Usage: [ODOO_SERIES=18.0] scripts/run-tests.sh [TEST_TAGS]
+#        (default tags: /o3p_mcp)
 #
-# Starts PostgreSQL 17 and Odoo 20 with docker compose (project
-# "o3p-mcp-test"), runs the tests once and removes the containers and
-# volumes again. Exits non-zero when the install or any test fails.
+# Starts PostgreSQL 17 and the odoo:<series> image with docker compose, runs
+# the tests once and removes the containers and volumes again. The series is
+# read from the addon's manifest version (18.0.x -> odoo:18.0) unless
+# ODOO_SERIES is set. The compose project is "o3p-mcp-test" for 20.0 and
+# "o3p-mcp-test<major>" otherwise. Exits non-zero when the install or any
+# test fails.
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 tags=${1:-/o3p_mcp}
-compose=(docker compose -p o3p-mcp-test -f "$here/compose.test.yaml")
+manifest="$here/../o3p_mcp/__manifest__.py"
+series=${ODOO_SERIES:-$(sed -nE 's/.*"version": "([0-9]+\.0)\..*/\1/p' "$manifest")}
+if [ -z "$series" ]; then
+    echo "Cannot read the Odoo series from $manifest; set ODOO_SERIES." >&2
+    exit 2
+fi
+export ODOO_SERIES=$series
+project=o3p-mcp-test
+[ "$series" = "20.0" ] || project="o3p-mcp-test${series%%.*}"
+compose=(docker compose -p "$project" -f "$here/compose.test.yaml")
+echo "odoo:$series, compose project $project"
 log=$(mktemp)
 
 cleanup() {
