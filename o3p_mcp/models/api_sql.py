@@ -652,3 +652,164 @@ class O3pMcpApiSql(models.AbstractModel):
         cursor.execute("SELECT oid, format_type(oid, NULL) FROM pg_type WHERE oid = ANY(%s)", [oids])
         types = dict(cursor.fetchall())
         return [{"name": column.name, "type": types.get(column.type_code, "unknown")} for column in description]
+
+    # ------------------------------------------------------------------
+    # Settings check
+    # ------------------------------------------------------------------
+
+    @api.model
+    def _sql_check(self):
+        """Connect as every sandbox role and verify it can do nothing else.
+
+        Returns ``(ok, lines)``. Each role must log in to the sandbox database
+        and nowhere else, hold no attribute, membership or privilege beyond
+        CONNECT and TEMPORARY there, find no relation, extension or file
+        function it could use, and fail to log in to Odoo's own database.
+        The sandbox must not be the PostgreSQL instance holding Odoo's
+        database.
+        """
+        _ = self.env._
+        settings = self._sql_settings()
+        if not settings["host"]:
+            return False, [_("Set the sandbox host first.")]
+        problems, notes = [], []
+        if parse_sql is None:
+            problems.append(_("The Python package pglast is not installed."))
+        if not sql_password():
+            problems.append(
+                _(
+                    "No sandbox password: set the %(env)s environment variable or %(key)s in the Odoo configuration file.",
+                    env=PASSWORD_ENV,
+                    key=PASSWORD_CONFIG_KEY,
+                )
+            )
+            return False, problems
+        odoo_db = self.env.cr.dbname
+        for slot in range(1, settings["roles"] + 1):
+            role = f"{settings['user']}_{slot}"
+            try:
+                connection = self._sql_connect(settings, slot, 10_000)
+            except psycopg2.Error as exc:
+                problems.append(
+                    _("%(role)s cannot log in to the sandbox: %(error)s", role=role, error=str(exc).strip().splitlines()[0][:200])
+                )
+                continue
+            try:
+                problems += [f"{role}: {problem}" for problem in self._sql_check_role(connection, odoo_db, notes)]
+            finally:
+                connection.rollback()
+                connection.close()
+            if self._sql_can_reach_odoo(role):
+                problems.append(_("%(role)s can log in to the Odoo database %(db)s.", role=role, db=odoo_db))
+        if problems:
+            return False, problems
+        lines = [
+            _(
+                "%(count)s sandbox roles %(user)s_1…%(user)s_%(count)s on %(host)s:%(port)s/%(db)s: "
+                "no privilege beyond CONNECT and TEMPORARY, no access to the Odoo database.",
+                count=settings["roles"],
+                user=settings["user"],
+                host=settings["host"],
+                port=settings["port"],
+                db=settings["database"],
+            )
+        ]
+        return True, lines + sorted(set(notes))
+
+    def _sql_check_role(self, connection, odoo_db, notes):
+        _ = self.env._
+        cursor = connection.cursor()
+        problems = []
+
+        def value(query, params=None):
+            cursor.execute(query, params)
+            return cursor.fetchone()[0]
+
+        cursor.execute(
+            "SELECT rolsuper, rolcreaterole, rolcreatedb, rolreplication, rolbypassrls, rolconnlimit"
+            " FROM pg_roles WHERE rolname = current_user"
+        )
+        superuser, createrole, createdb, replication, bypassrls, connlimit = cursor.fetchone()
+        for flag, label in (
+            (superuser, "SUPERUSER"),
+            (createrole, "CREATEROLE"),
+            (createdb, "CREATEDB"),
+            (replication, "REPLICATION"),
+            (bypassrls, "BYPASSRLS"),
+        ):
+            if flag:
+                problems.append(_("the role has %(attribute)s.", attribute=label))
+        if connlimit != 1:
+            problems.append(_("the role must have CONNECTION LIMIT 1."))
+        memberships = value(
+            "SELECT string_agg(g.rolname, ', ') FROM pg_auth_members m"
+            " JOIN pg_roles g ON g.oid = m.roleid JOIN pg_roles r ON r.oid = m.member"
+            " WHERE r.rolname = current_user"
+        )
+        if memberships:
+            problems.append(_("the role is a member of %(roles)s.", roles=memberships))
+        if value("SELECT has_database_privilege(current_database(), 'CREATE')"):
+            problems.append(_("the role may create schemas in the sandbox database."))
+        if not value("SELECT has_database_privilege(current_database(), 'TEMPORARY')"):
+            problems.append(_("the role may not create temporary tables in the sandbox database."))
+        schemas = value(
+            "SELECT string_agg(nspname, ', ') FROM pg_namespace"
+            " WHERE has_schema_privilege(oid, 'CREATE') AND nspname !~ '^pg_(toast_)?temp_'"
+        )
+        if schemas:
+            problems.append(_("the role may create objects in schemas %(schemas)s.", schemas=schemas))
+        relations = value(
+            "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace"
+            " WHERE n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')"
+            " AND n.nspname !~ '^pg_(toast_)?temp_'"
+        )
+        if relations:
+            problems.append(_("the sandbox database is not empty (%(count)s relations).", count=relations))
+        extensions = value("SELECT string_agg(extname, ', ') FROM pg_extension WHERE extname <> 'plpgsql'")
+        if extensions:
+            problems.append(_("the sandbox database has extensions %(names)s.", names=extensions))
+        databases = value(
+            "SELECT string_agg(datname, ', ') FROM pg_database WHERE datallowconn"
+            " AND datname <> current_database() AND has_database_privilege(datname, 'CONNECT')"
+        )
+        if databases:
+            problems.append(_("the role may connect to databases %(names)s.", names=databases))
+        if value("SELECT count(*) FROM pg_database WHERE datname = %s", [odoo_db]):
+            problems.append(
+                _("the sandbox runs on the PostgreSQL instance that holds the Odoo database; use a separate instance.")
+            )
+        functions = value(
+            "SELECT string_agg(f, ', ') FROM unnest(%s::text[]) f WHERE has_function_privilege(f, 'EXECUTE')",
+            [
+                [
+                    "pg_read_file(text)",
+                    "pg_read_binary_file(text)",
+                    "pg_ls_dir(text)",
+                    "pg_stat_file(text)",
+                    "lo_import(text)",
+                    "lo_export(oid,text)",
+                ]
+            ],
+        )
+        if functions:
+            problems.append(_("the role may run %(names)s.", names=functions))
+        cursor.execute("CREATE TEMPORARY TABLE o3p_mcp_check (x integer) ON COMMIT DROP")
+        if value("SELECT current_setting('temp_file_limit')") == "-1":
+            notes.append(_("temp_file_limit is unlimited for the sandbox roles; consider ALTER ROLE … SET temp_file_limit."))
+        return problems
+
+    def _sql_can_reach_odoo(self, role):
+        try:
+            connection = psycopg2.connect(
+                host=config.get("db_host") or None,
+                port=config.get("db_port") or None,
+                dbname=self.env.cr.dbname,
+                user=role,
+                password=sql_password(),
+                connect_timeout=CONNECT_TIMEOUT,
+                sslmode=config.get("db_sslmode") or "prefer",
+            )
+        except psycopg2.Error:
+            return False
+        connection.close()
+        return True
