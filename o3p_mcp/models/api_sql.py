@@ -65,6 +65,16 @@ MAX_ERROR_MESSAGE = 500
 CONNECT_TIMEOUT = 5
 # Seconds the watchdog waits beyond the statement timeout before cancelling.
 WATCHDOG_GRACE = 1.0
+# Rows are fetched from a cursor in the sandbox. Each row's values are
+# measured there (bytes of their text form, plus this much per value for
+# the decoded Python objects) and a row larger than the largest answer
+# arrives with its values emptied, so the worker never receives more than
+# FETCH_MEMORY bytes of values per fetch, nor more than the largest answer
+# in all.
+VALUE_OVERHEAD = 16
+FETCH_MEMORY = 16_000_000
+MAX_FETCH_ROWS = 100
+CURSOR_NAME = "o3p_mcp_rows"
 # Advisory lock namespaces in Odoo's database (two-key form, int4 each).
 LOCK_SANDBOX_ROLE = 55_623_681
 LOCK_USER_SLOT = 55_623_682
@@ -80,6 +90,9 @@ MSG_TOO_MANY_ROWS = (
     "use the search or group operations for it."
 )
 MSG_TOO_MANY_BYTES = "The tables the query reads are too large; name fewer columns or tables."
+MSG_ANSWER_TOO_LARGE = (
+    "The answer is too large; select fewer or smaller values, or ask for fewer rows."
+)
 MSG_USER_BUSY = "You already have the maximum number of SQL queries running."
 MSG_SANDBOX_BUSY = "All SQL sandbox connections are busy; try again shortly."
 MSG_NOT_CONFIGURED = "SQL queries are not configured on this server."
@@ -111,7 +124,7 @@ def _walk(node):
 
 
 def parse_query(query):
-    """Check ``query`` and return ``(tables, columns)`` it may read.
+    """Check ``query`` and return ``(tables, columns, statement, offset)``.
 
     Exactly one ``SELECT`` (or ``VALUES``/``TABLE``) without ``INTO`` or a
     locking clause is accepted. ``tables`` are the relation names it
@@ -119,6 +132,9 @@ def parse_query(query):
     asks for whole rows (``*`` or a table used as a value). Both are
     over-approximations: a name copied for nothing costs time, a name
     missed only makes the query fail; nothing here decides what is visible.
+    ``statement`` is the statement's own text (without the surrounding
+    comments, spaces and semicolon) and ``offset`` where it starts in
+    ``query``, in characters.
     """
     if parse_sql is None:
         raise ApiError("unavailable", MSG_NOT_CONFIGURED)
@@ -129,6 +145,8 @@ def parse_query(query):
         raise gate_error("42601", str(exc.args[0]), location) from None
     if len(statements) != 1 or not isinstance(statements[0].stmt, pg_ast.SelectStmt):
         raise gate_error("0A000", MSG_ONE_SELECT)
+    offset, length = statements[0].stmt_location, statements[0].stmt_len
+    statement = query[offset : offset + length] if length else query[offset:]
     tables, aliases, columns, single_names, whole_rows = set(), set(), set(), set(), False
     for node in _walk(statements[0].stmt):
         if isinstance(node, pg_ast.SelectStmt) and (node.intoClause or node.lockingClause):
@@ -150,8 +168,8 @@ def parse_query(query):
                     single_names.add(last.sval)
     # A bare table name or alias used as a value is a whole-row reference.
     if whole_rows or single_names & aliases:
-        return tables, None
-    return tables, columns
+        return tables, None, statement, offset
+    return tables, columns, statement, offset
 
 
 def json_value(value):
@@ -481,7 +499,7 @@ class O3pMcpApiSql(models.AbstractModel):
         settings = self._sql_settings()
         if not settings["host"] or not sql_password() or parse_sql is None:
             raise ApiError("unavailable", MSG_NOT_CONFIGURED)
-        tables, columns = parse_query(query)
+        tables, columns, statement, offset = parse_query(query)
         sources = self._sql_sources(tables, columns)
         names = [table for table, _model, _select in sources]
         role = self._sql_acquire_slots(settings)
@@ -506,11 +524,7 @@ class O3pMcpApiSql(models.AbstractModel):
             watchdog = threading.Timer(remaining_ms / 1000 + WATCHDOG_GRACE, connection.cancel)
             watchdog.start()
             try:
-                cursor.execute(query)
-                description = cursor.description or ()
-                rows = cursor.fetchmany(limit + 1) if description else []
-            except psycopg2.Error as exc:
-                raise self._sql_query_error(exc, names) from None
+                description, rows = self._sql_fetch(cursor, statement, offset, limit, names)
             finally:
                 watchdog.cancel()
             columns_out = self._sql_column_types(cursor, description)
@@ -534,6 +548,62 @@ class O3pMcpApiSql(models.AbstractModel):
             ],
         }
         return result, None, len(rows), names
+
+    def _sql_fetch(self, cursor, statement, offset, limit, names):
+        """Run ``statement`` through a cursor; return its description and rows.
+
+        At most ``limit + 1`` rows are fetched, in small batches. The
+        statement is wrapped so that the sandbox reports each row's size and
+        empties rows larger than the largest answer; an oversized row, or
+        rows adding up to more than the largest answer, end the query with
+        result_too_large before more data arrives.
+        """
+        cap = self._max_response_bytes()
+        prefix = "SELECT * FROM (\n"
+        self._sql_execute(cursor, prefix, statement, "\n) AS o3p_q LIMIT 0", offset, names)
+        description = list(cursor.description)
+        width = len(description)
+        if width:
+            columns = [f"o3p_c{index}" for index in range(width)]
+            size = " + ".join(f"coalesce(octet_length(o3p_q.{c}::text)::bigint, 0)" for c in columns)
+            values = ", ".join(f"CASE WHEN o3p_r.o3p_size <= {cap} THEN o3p_r.{c} END" for c in columns)
+            prefix = (
+                f"DECLARE {CURSOR_NAME} NO SCROLL CURSOR FOR SELECT {values}, o3p_r.o3p_size"
+                f" FROM (SELECT o3p_q.*, {size} + {width * VALUE_OVERHEAD} AS o3p_size FROM (\n"
+            )
+            suffix = f"\n) AS o3p_q({', '.join(columns)})) AS o3p_r"
+        else:
+            prefix, suffix = f"DECLARE {CURSOR_NAME} NO SCROLL CURSOR FOR \n", "\n"
+        self._sql_execute(cursor, prefix, statement, suffix, offset, names)
+        batch = max(1, min(MAX_FETCH_ROWS, FETCH_MEMORY // cap))
+        rows, total = [], 0
+        while len(rows) <= limit:
+            wanted = min(batch, limit + 1 - len(rows))
+            try:
+                cursor.execute(f"FETCH FORWARD {wanted} FROM {CURSOR_NAME}")
+                chunk = cursor.fetchall()
+            except psycopg2.Error as exc:
+                raise self._sql_query_error(exc, names) from None
+            for row in chunk:
+                if len(rows) < limit:
+                    row_size = row[-1] if width else 0
+                    total += row_size
+                    if row_size > cap or total > cap:
+                        raise ApiError("result_too_large", MSG_ANSWER_TOO_LARGE, tables=names)
+                rows.append(row[:-1] if width else row)
+            if len(chunk) < wanted:
+                break
+        return description, rows
+
+    def _sql_execute(self, cursor, prefix, statement, suffix, offset, names):
+        """Execute the user's statement wrapped in our own SQL.
+
+        PostgreSQL's error positions are moved back to the user's query.
+        """
+        try:
+            cursor.execute(prefix + statement + suffix)
+        except psycopg2.Error as exc:
+            raise self._sql_query_error(exc, names, (len(prefix), len(statement), offset)) from None
 
     @staticmethod
     def _sql_limit_query(cursor, milliseconds):
@@ -611,22 +681,33 @@ class O3pMcpApiSql(models.AbstractModel):
         return ApiError("query_error", tables=names)
 
     @staticmethod
-    def _sql_query_error(error, names):
+    def _sql_query_error(error, names, placement=None):
         """Map a sandbox error about the user's query to an API error.
 
         The sandbox holds only rows the user may read, so PostgreSQL's own
         message cannot reveal anything else; it is passed on, capped.
+        ``placement`` is ``(prefix length, statement length, offset)`` of the
+        user's statement in the SQL that ran, to report positions in the
+        user's query; a position outside the statement is not reported.
         """
         if isinstance(error, pg_errors.QueryCanceled):
             return ApiError("timeout", tables=names)
         diag = getattr(error, "diag", None)
         position = getattr(diag, "statement_position", None)
+        position = int(position) if position and position.isdigit() else None
+        if position is not None:
+            shift, length, offset = placement or (0, None, 0)
+            position -= shift
+            if position < 1 or (length is not None and position > length):
+                position = None
+            else:
+                position += offset
         message = getattr(diag, "message_primary", None) or str(error).splitlines()[0]
         return ApiError(
             "query_error",
             details={
                 "sqlstate": getattr(error, "pgcode", None),
-                "position": int(position) if position and position.isdigit() else None,
+                "position": position,
                 "message": message[:MAX_ERROR_MESSAGE],
             },
             tables=names,

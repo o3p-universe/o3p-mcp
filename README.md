@@ -383,7 +383,11 @@ size (default 64 MB), otherwise `result_too_large`; each user runs at most
 the configured number of queries at once (default 2), and all users
 together at most one per sandbox role (default 4), otherwise
 `too_many_requests`; the copy and the query each stop at the data API's
-time limit (`timeout`). Names in the query decide what is copied, so a
+time limit (`timeout`). The answer is read from a cursor in the sandbox, at
+most `limit` + 1 rows, in small batches; the sandbox measures each row
+(the text form of its values) and sends no values for a row larger than
+the data API's largest answer, so a row, or rows together, larger than
+that answer `result_too_large` without the data ever reaching Odoo. Names in the query decide what is copied, so a
 query that names few columns of large tables is faster than `SELECT *`.
 
 Values come as JSON: numbers for integer, numeric and float columns,
