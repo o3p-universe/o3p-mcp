@@ -60,6 +60,8 @@ class TestSqlMatchesOrm(O3pMcpSqlCase):
                         self.expect_missing(result, table, name)
                         continue
                     model_name, field_name = entries[0]
+                    # Odoo 18 caches x2many values per record for every user.
+                    self.env.invalidate_all()
                     records = self.env[model_name].with_user(user).with_context(active_test=False).search([])
                     pairs = sum(len(record[field_name]) for record in records)
                     self.assertEqual(result["rows"], [[pairs]], f"{table} for {name}")
