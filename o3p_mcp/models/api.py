@@ -74,7 +74,15 @@ COUNT_AGGREGATES = frozenset({"count", "count_distinct"})
 DATE_GRANULARITIES = frozenset({"day", "week", "month", "quarter", "year"})
 TIMEZONES = frozenset(available_timezones())
 X2MANY_TYPES = frozenset({"one2many", "many2many"})
-# Like operators on an x2many field match the related records' display name.
+# Text operands on a relational field match the related records' display
+# name: operator -> the positive operator applied to display_name.
+NAME_OPERATORS = {
+    "=": "=",
+    "!=": "=",
+    "in": "in",
+    "not in": "in",
+}
+NEGATIVE_NAME_OPERATORS = frozenset({"!=", "not in", "not like", "not ilike"})
 LIKE_OPERATORS = {
     "like": "like",
     "ilike": "ilike",
@@ -417,16 +425,47 @@ class O3pMcpApi(models.AbstractModel):
         name must be filterable on it (a model hiding data on read does not
         allow it).
         """
+        values = operand if isinstance(operand, list) else [operand]
         if (
-            len(operand) > MAX_STRING
+            len(values) > MAX_VALUES
+            or any(len(value) > MAX_STRING for value in values)
             or "display_name" not in self._filterable_fields(comodel)
         ):
             raise ApiError("invalid_params", MSG_DOMAIN)
+        positive = LIKE_OPERATORS.get(operator) or NAME_OPERATORS[operator]
         return [
             name,
-            "not any" if operator.startswith("not ") else "any",
-            [["display_name", LIKE_OPERATORS[operator], operand]],
+            "not any" if operator in NEGATIVE_NAME_OPERATORS else "any",
+            [["display_name", positive, operand]],
         ]
+
+    def _many2one_term(self, model, field, operator, operand):
+        """Return a condition on a many2one field.
+
+        Record ids (and ``false``) are compared with the column itself. Text
+        operands match the related records by display name through
+        ``_display_name_term``, so the related model's rules apply; Odoo
+        would otherwise search names without them where the field bypasses
+        access. A relation that bypasses access is refused by ``_comodel``.
+        """
+        values = operand if isinstance(operand, list) else [operand]
+        if len(values) <= MAX_VALUES and all(
+            value is False or value is None or (type(value) is int and value > 0)
+            for value in values
+        ):
+            if operator in LIKE_OPERATORS:
+                raise ApiError("invalid_params", MSG_DOMAIN)
+            return [field.name, operator, operand]
+        text = all(isinstance(value, str) for value in values)
+        list_operator = operator in ("in", "not in")
+        if text and (
+            (list_operator and isinstance(operand, list))
+            or (not list_operator and isinstance(operand, str)
+                and (operator in LIKE_OPERATORS or operator in NAME_OPERATORS))
+        ):
+            comodel = self._comodel(model, field)
+            return self._display_name_term(comodel, field.name, operator, operand)
+        raise ApiError("invalid_params", MSG_DOMAIN)
 
     def _term(self, model, names, operator, operand, depth):
         """Return the checked domain term for the field path ``names``.
@@ -448,6 +487,8 @@ class O3pMcpApi(models.AbstractModel):
         if field.type in X2MANY_TYPES:
             comodel = self._comodel(model, field)
             return self._x2many_term(comodel, field.name, operator, operand)
+        if field.type == "many2one":
+            return self._many2one_term(model, field, operator, operand)
         self._check_operand(operand)
         return [field.name, operator, operand]
 
