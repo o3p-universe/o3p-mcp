@@ -44,6 +44,7 @@ All URLs are relative to `web.base.url`, which is also the issuer.
 |---|---|
 | `GET /.well-known/oauth-authorization-server` | Authorization server metadata (RFC 8414) |
 | `POST /o3p_mcp/oauth/register` | Dynamic client registration (RFC 7591) |
+| `GET`, `POST /o3p_mcp/oauth/authorize` | Sign-in and consent (authorization code with PKCE) |
 
 The metadata and registration endpoints answer cross-origin requests
 (`Access-Control-Allow-Origin: *`) and never create a session.
@@ -65,6 +66,36 @@ once, in the registration response.
 
 Each address may register at most 20 clients per hour; further requests get
 HTTP 429 with `Retry-After`.
+
+### Authorization
+
+`GET /o3p_mcp/oauth/authorize` takes the usual OAuth 2.1 parameters:
+`response_type=code`, `client_id`, `redirect_uri`, `scope`, `state`,
+`code_challenge` with `code_challenge_method=S256`, and `resource`.
+
+- A visitor who is not signed in is sent to the Odoo login page and comes
+  back afterwards.
+- An unknown or archived client, or a redirect URI that is not exactly one of
+  the client's registered URIs, shows an error page; Odoo never redirects to
+  an unregistered URI. When the client has a single redirect URI,
+  `redirect_uri` may be omitted.
+- PKCE with `S256` is required; `plain` is refused.
+- `resource` must be the configured MCP URL (a trailing slash is ignored).
+  When it is omitted, the configured MCP URL is used, since it is the only
+  resource Odoo issues tokens for.
+- `scope` may list `okf.read` and `okf.write` and must include `okf.read`;
+  without `scope` both are requested. The grant is narrowed to what the
+  user's groups allow, so an MCP user who asks for `okf.write` gets
+  `okf.read` only.
+- A user without the MCP User group sees an error page with a link that
+  returns `error=access_denied` to the client.
+
+The consent page names the client, the user, the MCP server and the scopes,
+and shows where the answer is sent. It cannot be framed. Approving posts the
+form back with Odoo's CSRF token and redirects to the client with `code`,
+`state` and `iss` (RFC 9207); denying redirects with `error=access_denied`.
+Other request errors are redirected to the client with `error`,
+`error_description`, `state` and `iss`.
 
 ## Installation
 

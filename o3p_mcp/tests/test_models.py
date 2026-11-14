@@ -3,6 +3,7 @@ from datetime import timedelta, timezone
 from unittest.mock import patch
 
 from odoo import fields
+from odoo.exceptions import ValidationError
 from odoo.tests import TransactionCase, tagged
 
 from ..models.oauth import OAuthError
@@ -153,7 +154,9 @@ class TestTokens(O3pMcpCommon, TransactionCase):
         self.assertEqual(new.state, "revoked")
 
     def test_refresh_token_is_bound_to_its_client(self):
-        other_client = self.env["o3p.mcp.client"].create({"name": "Other"})
+        other_client = self.env["o3p.mcp.client"].create(
+            {"name": "Other", "redirect_uris": ["https://other.example.com/cb"]}
+        )
         _token, response = self.issue()
         self.assertOAuthError(
             "invalid_grant", self.Token._rotate, response["refresh_token"], other_client
@@ -261,7 +264,11 @@ class TestClientAuthentication(O3pMcpCommon, TransactionCase):
     def test_confidential_client(self):
         Client = self.env["o3p.mcp.client"]
         client = Client.create(
-            {"name": "Confidential", "token_endpoint_auth_method": "client_secret_basic"}
+            {
+                "name": "Confidential",
+                "redirect_uris": ["https://confidential.example.com/cb"],
+                "token_endpoint_auth_method": "client_secret_basic",
+            }
         )
         secret = client._set_new_secret()
         self.assertNotIn(secret, client.secret_hash)
@@ -279,3 +286,10 @@ class TestClientAuthentication(O3pMcpCommon, TransactionCase):
         Client._authenticate(client.client_id, new_secret, "client_secret_basic")
         client.active = False
         self.assertInvalidClient(client.client_id, new_secret, "client_secret_basic")
+
+    def test_redirect_uris_are_validated(self):
+        Client = self.env["o3p.mcp.client"]
+        for uris in (["javascript:alert(1)"], ["http://app.example.com/cb"], "x", []):
+            with self.subTest(uris=uris), self.assertRaises(ValidationError):
+                Client.create({"name": "Bad", "redirect_uris": uris})
+        Client.create({"name": "Server", "kind": "resource_server"})

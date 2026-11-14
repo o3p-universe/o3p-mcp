@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <template id="oauth_consent" name="MCP authorization consent">
+        <t t-set="disable_database_manager" t-value="True"/>
+        <t t-call="web.login_layout">
+            <div class="o_o3p_mcp_consent">
+                <h1 class="h4 mb-3">Allow access?</h1>
+                <p>
+                    <strong t-out="client_name"/> wants to use the MCP server
+                    <code t-out="resource"/> as <strong t-out="user_name"/>.
+                </p>
+                <p class="mb-1">It will be able to:</p>
+                <ul class="mb-3">
+                    <li t-foreach="scopes" t-as="scope">
+                        <t t-out="scope[1]"/> (<code t-out="scope[0]"/>)
+                    </li>
+                </ul>
+                <p class="small text-muted mb-1">
+                    Your answer is sent to <code t-out="redirect_target"/>.
+                </p>
+                <p class="small text-muted">
+                    Client ID <code t-out="client_id"/>.
+                    <t t-if="self_registered">
+                        This application registered itself; its name is not verified.
+                    </t>
+                </p>
+                <form method="post" t-att-action="action">
+                    <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                    <input t-foreach="fields" t-as="field" type="hidden"
+                           t-att-name="field[0]" t-att-value="field[1]"/>
+                    <div class="d-grid gap-2">
+                        <button type="submit" name="decision" value="approve" class="btn btn-primary">Allow</button>
+                        <button type="submit" name="decision" value="deny" class="btn btn-secondary">Deny</button>
+                    </div>
+                </form>
+            </div>
+        </t>
+    </template>
+
+    <template id="oauth_error" name="MCP authorization error">
+        <t t-set="disable_database_manager" t-value="True"/>
+        <t t-call="web.login_layout">
+            <div class="o_o3p_mcp_error">
+                <h1 class="h4 mb-3">Authorization failed</h1>
+                <p class="alert alert-danger" role="alert" t-out="message"/>
+                <a t-if="return_url" t-att-href="return_url" class="btn btn-secondary w-100">
+                    Return to the application
+                </a>
+            </div>
+        </t>
+    </template>
+</odoo>

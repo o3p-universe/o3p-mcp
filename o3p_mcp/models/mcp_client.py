@@ -2,6 +2,7 @@ import secrets
 from datetime import timedelta, timezone
 
 from odoo import api, fields, models
+from odoo.exceptions import ValidationError
 
 from .oauth import (
     CLIENT_AUTH_METHODS,
@@ -90,6 +91,24 @@ class O3pMcpClient(models.Model):
             client.redirect_uris_text = (
                 "\n".join(uris) if isinstance(uris, list) else False
             )
+
+    @api.constrains("redirect_uris", "kind")
+    def _check_redirect_uris(self):
+        for client in self:
+            uris = client.redirect_uris or []
+            if not isinstance(uris, list) or not all(
+                is_allowed_redirect_uri(uri) for uri in uris
+            ):
+                raise ValidationError(
+                    self.env._(
+                        "Redirect URIs must be a list of https URLs, http URLs on a "
+                        "loopback host or private-use schemes, without a fragment."
+                    )
+                )
+            if client.kind == "client" and not uris and client.active:
+                raise ValidationError(
+                    self.env._("An MCP client needs at least one redirect URI.")
+                )
 
     def _set_new_secret(self):
         """Store a new client secret and return it; it is never readable again."""

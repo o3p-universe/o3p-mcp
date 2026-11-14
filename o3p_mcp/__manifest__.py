@@ -6,7 +6,7 @@
         "and introspects OAuth 2.1 access tokens whose scopes follow the user's "
         "MCP groups."
     ),
-    "version": "20.0.1.2.0",
+    "version": "20.0.1.3.0",
     "category": "Technical",
     "author": "O3P",
     "website": "https://github.com/o3p-universe/o3p-mcp",
@@ -16,6 +16,7 @@
         "security/o3p_mcp_security.xml",
         "security/ir.access.csv",
         "data/ir_cron_data.xml",
+        "views/oauth_templates.xml",
     ],
     "auto_install": False,
     "installable": True,
