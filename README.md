@@ -62,8 +62,11 @@ All URLs are relative to the issuer (see Settings).
 | `POST /o3p_mcp/api/v1/<op>` | Data API for the MCP server, read-only, as the signed-in user |
 
 The metadata, registration, token and revocation endpoints answer
-cross-origin requests (`Access-Control-Allow-Origin: *`); introspection does
-not. None of the API endpoints creates a session.
+cross-origin requests (`Access-Control-Allow-Origin: *`); their preflight
+allows the `Authorization`, `Content-Type` and `MCP-Protocol-Version`
+request headers, the last one being sent by MCP clients on every request.
+Introspection and the data API answer no cross-origin requests. None of the
+API endpoints creates a session.
 
 ### Client registration
 
