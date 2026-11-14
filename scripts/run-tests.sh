@@ -3,14 +3,16 @@
 #
 # Usage: scripts/run-tests.sh [TEST_TAGS]     (default: /o3p_mcp)
 #
-# Starts PostgreSQL 17 and Odoo 20 with docker compose (project
-# "o3p-mcp-test"), runs the tests once and removes the containers and
-# volumes again. Exits non-zero when the install or any test fails.
+# Starts PostgreSQL 17, a second PostgreSQL 17 instance as the SQL sandbox
+# and Odoo 20 (an image with pglast added, built on first use) with docker
+# compose, runs the tests once and removes the containers and volumes again.
+# The compose project is "o3p-mcp-test", or $O3P_MCP_TEST_PROJECT. Exits
+# non-zero when the install or any test fails.
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 tags=${1:-/o3p_mcp}
-compose=(docker compose -p o3p-mcp-test -f "$here/compose.test.yaml")
+compose=(docker compose -p "${O3P_MCP_TEST_PROJECT:-o3p-mcp-test}" -f "$here/compose.test.yaml")
 log=$(mktemp)
 
 cleanup() {
@@ -19,7 +21,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-"${compose[@]}" up -d --wait db >/dev/null
+"${compose[@]}" build --quiet odoo
+"${compose[@]}" up -d --wait db sandbox >/dev/null
 
 set +e
 "${compose[@]}" run --rm --no-deps odoo odoo \
