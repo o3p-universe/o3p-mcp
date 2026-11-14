@@ -10,10 +10,15 @@ The addon adds an **MCP** privilege with two groups:
 
 | Group | Scopes granted |
 |---|---|
-| MCP / User | `okf.read` |
-| MCP / Editor (implies User) | `okf.read`, `okf.write` |
+| MCP / User | `okf.read`, `odoo.read`, `odoo.sql` |
+| MCP / Editor (implies User) | the User scopes and `okf.write` |
 
-`okf.read` is required for any MCP call; `okf.write` enables live write tools.
+| Scope | Allows |
+|---|---|
+| `okf.read` | Any MCP call; required in every token |
+| `okf.write` | Live write tools and producer runs on the knowledge base |
+| `odoo.read` | Reading Odoo records through the data API, with the user's own rights |
+| `odoo.sql` | Reserved for permission-scoped SQL; no operation uses it yet |
 Only active internal users hold scopes: archived users, portal and public
 users (even when placed in an MCP group) and users without the User group
 hold none.
@@ -98,10 +103,12 @@ client that has not completed a token exchange within 24 hours is deleted.
 - `resource` must be the configured MCP URL (a trailing slash is ignored).
   When it is omitted, the configured MCP URL is used, since it is the only
   resource Odoo issues tokens for.
-- `scope` may list `okf.read` and `okf.write` and must include `okf.read`;
-  without `scope` both are requested. The grant is narrowed to what the
-  user's groups allow, so an MCP user who asks for `okf.write` gets
-  `okf.read` only.
+- `scope` may list any of the four scopes and must include `okf.read`;
+  without `scope` all of them are requested. The grant is narrowed to what
+  the user's groups allow, so an MCP user who asks for `okf.write` does not
+  get it. A token only carries the scopes requested when it was authorized:
+  a client that asked for `okf.read okf.write` has to sign in again to use
+  the Odoo scopes.
 - A user without the MCP User group sees an error page with a link that
   returns `error=access_denied` to the client. This is checked right after
   the client and redirect URI, before any other parameter.
@@ -151,7 +158,7 @@ resource-server client. Missing or wrong credentials get HTTP 401 with
 
 ```json
 { "active": true, "sub": "42", "username": "jdoe", "name": "Jane Doe",
-  "email": "jdoe@example.com", "scope": "okf.read okf.write",
+  "email": "jdoe@example.com", "scope": "okf.read okf.write odoo.read odoo.sql",
   "aud": "https://mcp.example.com/mcp", "exp": 1794000000, "client_id": "c_…" }
 ```
 

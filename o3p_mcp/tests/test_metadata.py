@@ -138,7 +138,7 @@ class TestMetadataAndRegistration(HttpCase):
                 "registration_endpoint": f"{issuer}/o3p_mcp/oauth/register",
                 "revocation_endpoint": f"{issuer}/o3p_mcp/oauth/revoke",
                 "introspection_endpoint": f"{issuer}/o3p_mcp/oauth/introspect",
-                "scopes_supported": ["okf.read", "okf.write"],
+                "scopes_supported": ["okf.read", "okf.write", "odoo.read", "odoo.sql"],
                 "response_types_supported": ["code"],
                 "response_modes_supported": ["query"],
                 "grant_types_supported": ["authorization_code", "refresh_token"],

@@ -214,6 +214,23 @@ class TestAuthorize(O3pMcpHttpCase):
         self.assertEqual(code.scope, "okf.read")
         self.assertEqual(code.resource, RESOURCE)
 
+    def test_default_scope_is_everything_the_user_may_hold(self):
+        self.authenticate("o3p_mcp_editor", "o3p_mcp_editor")
+        page = self.get_consent(scope=None)
+        for scope in ("okf.read", "okf.write", "odoo.read", "odoo.sql"):
+            self.assertIn(f"<code>{scope}</code>", page.text)
+        self.decide("approve", scope=None)
+        self.assertEqual(
+            self.Code.search([("user_id", "=", self.editor.id)]).scope,
+            "okf.read okf.write odoo.read odoo.sql",
+        )
+        self.authenticate("o3p_mcp_reader", "o3p_mcp_reader")
+        self.decide("approve", scope="okf.read odoo.read")
+        self.assertEqual(
+            self.Code.search([("user_id", "=", self.reader.id)]).scope,
+            "okf.read odoo.read",
+        )
+
     def test_deny(self):
         self.authenticate("o3p_mcp_editor", "o3p_mcp_editor")
         self.assertClientError(self.decide("deny"), "access_denied")

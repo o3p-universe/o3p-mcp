@@ -14,10 +14,15 @@ from odoo import api, models
 
 SCOPE_READ = "okf.read"
 SCOPE_WRITE = "okf.write"
+SCOPE_ODOO_READ = "odoo.read"
+# Reserved for permission-scoped SQL; no operation uses it yet.
+SCOPE_ODOO_SQL = "odoo.sql"
 # Each scope and the group that grants it, in the order scopes are listed.
 SCOPE_GROUPS = {
     SCOPE_READ: "o3p_mcp.group_mcp_user",
     SCOPE_WRITE: "o3p_mcp.group_mcp_editor",
+    SCOPE_ODOO_READ: "o3p_mcp.group_mcp_user",
+    SCOPE_ODOO_SQL: "o3p_mcp.group_mcp_user",
 }
 SCOPES = tuple(SCOPE_GROUPS)
 
@@ -312,6 +317,14 @@ class O3pMcpOauth(models.AbstractModel):
             SCOPE_READ: self.env._("Search and read the knowledge base"),
             SCOPE_WRITE: self.env._(
                 "Change the knowledge base with write tools and producer runs"
+            ),
+            SCOPE_ODOO_READ: self.env._(
+                "Read the Odoo records and fields your account can see, without "
+                "changing anything"
+            ),
+            SCOPE_ODOO_SQL: self.env._(
+                "Run read-only SQL limited to what your account can see "
+                "(reserved, not available yet)"
             ),
         }
         return [(scope, descriptions[scope]) for scope in SCOPES if scope in scopes]

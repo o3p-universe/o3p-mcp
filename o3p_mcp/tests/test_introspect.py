@@ -128,6 +128,18 @@ class TestIntrospection(O3pMcpResourceServerCase):
         self.assertEqual(self.revoke(tokens["access_token"]).status_code, 200)
         self.assertEqual(self.answer(tokens["access_token"]), INACTIVE)
 
+    def test_scope_grows_with_odoo_scopes(self):
+        tokens = self.tokens_for(scope=None)
+        answer = self.answer(tokens["access_token"])
+        self.assertEqual(answer["scope"], "okf.read okf.write odoo.read odoo.sql")
+        self.assertEqual(
+            list(answer), list(json.loads(FIXTURE.read_text()))
+        )
+        self.demote_to_reader(self.editor)
+        self.assertEqual(
+            self.answer(tokens["access_token"])["scope"], "okf.read odoo.read odoo.sql"
+        )
+
     def test_editor_group_removed(self):
         tokens = self.tokens_for()
         self.demote_to_reader(self.editor)

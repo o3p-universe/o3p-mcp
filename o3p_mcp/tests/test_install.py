@@ -18,7 +18,7 @@ class TestInstall(O3pMcpCommon, TransactionCase):
         self.assertTrue(editor_only.has_group("o3p_mcp.group_mcp_user"))
         self.assertEqual(
             self.env["o3p.mcp.oauth"]._scopes_for_user(editor_only),
-            {"okf.read", "okf.write"},
+            {"okf.read", "okf.write", "odoo.read", "odoo.sql"},
         )
         self.assertFalse(self.reader.has_group("o3p_mcp.group_mcp_editor"))
 
@@ -29,8 +29,13 @@ class TestInstall(O3pMcpCommon, TransactionCase):
     def test_scopes_for_user(self):
         oauth = self.env["o3p.mcp.oauth"]
         self.assertEqual(oauth._scopes_for_user(self.plain), set())
-        self.assertEqual(oauth._scopes_for_user(self.reader), {"okf.read"})
-        self.assertEqual(oauth._scopes_for_user(self.editor), {"okf.read", "okf.write"})
+        self.assertEqual(
+            oauth._scopes_for_user(self.reader), {"okf.read", "odoo.read", "odoo.sql"}
+        )
+        self.assertEqual(
+            oauth._scopes_for_user(self.editor),
+            {"okf.read", "okf.write", "odoo.read", "odoo.sql"},
+        )
 
     def test_scopes_need_an_active_internal_user(self):
         oauth = self.env["o3p.mcp.oauth"]
