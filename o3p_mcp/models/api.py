@@ -164,9 +164,10 @@ REASONS = {
     "bypass_relation": "This relation ignores the related model's access rules: search the related model first, then filter on its record ids.",
     "no_relation_access": "The user may not read the model this relation points to.",
     "no_model_access": "The user may not read this model.",
+    "unknown_model": "Call the models operation (odoo_find_models) to list the models you may read.",
     "bad_operator": "Use =, !=, >, >=, <, <=, =?, in, not in, like, not like, ilike, not ilike, =like, =ilike, any or not any (child_of and parent_of are not available); on relations compare record ids, or match names with =, in, like or ilike.",
     "bad_order": "Use field, field asc or field desc items separated by commas.",
-    "bad_aggregate": "Use __count, field:sum|avg|min|max on numeric fields, or field:count|count_distinct on stored fields.",
+    "bad_aggregate": "Use __count, field:sum|avg|min|max on stored numeric fields, or field:count|count_distinct on stored fields.",
     "granularity_required": "Append :day, :week, :month, :quarter or :year to a date field (or :hour to a datetime field).",
     "bad_granularity": "Only date and datetime fields take a granularity: day, week, month, quarter or year, and hour for datetimes.",
 }
@@ -365,7 +366,7 @@ class O3pMcpApi(models.AbstractModel):
     def _model(self, name):
         """Return model ``name`` for the user, or raise."""
         if not self._exposed_model(name):
-            raise ApiError("unknown_model")
+            raise invalid("unknown_model", model=name, code="unknown_model")
         model = self.env[name]
         if not model.has_access("read"):
             raise invalid("no_model_access", model=name, code="access_denied")
@@ -391,15 +392,19 @@ class O3pMcpApi(models.AbstractModel):
             raise invalid("bad_value", name, message=MSG_RANGE)
         return value
 
-    def _field_problem(self, model, name, path, message):
-        """Return the error for ``name`` missing from the usable fields."""
+    def _field_problem(self, model, name, path, message, owner=None):
+        """Return the error for ``name`` missing from the usable fields.
+
+        ``owner`` names the model the field was looked up on, for a field
+        reached through a path.
+        """
         if name not in model._fields:
             reason = "unknown_field"
         elif name not in self._readable_fields(model):
             reason = "not_readable"
         else:
             reason = "not_filterable"
-        return invalid(reason, path, message=message)
+        return invalid(reason, path, message=message, model=owner)
 
     def _fields_param(self, model, value):
         """Return the requested field names, all readable and not hidden."""
@@ -529,13 +534,15 @@ class O3pMcpApi(models.AbstractModel):
         many2many fields are rewritten by ``_x2many_term``.
         """
         path = prefix + names[0]
+        # A field reached through a path belongs to another model: name it.
+        owner = model._name if prefix else None
         field = self._filterable_fields(model).get(names[0])
         if field is None:
-            raise self._field_problem(model, names[0], path, MSG_DOMAIN)
+            raise self._field_problem(model, names[0], path, MSG_DOMAIN, owner)
         # Odoo silently ignores a condition on a computed field it cannot
         # search (not stored, no search method): the answer would be wrong.
         if not field._description_searchable:
-            raise invalid("not_searchable", path, message=MSG_DOMAIN)
+            raise invalid("not_searchable", path, message=MSG_DOMAIN, model=owner)
         if len(names) > 1:
             comodel = self._comodel(model, field, path)
             return [

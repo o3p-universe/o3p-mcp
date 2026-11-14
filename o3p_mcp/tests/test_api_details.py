@@ -33,9 +33,12 @@ class TestErrorDetails(O3pMcpApiCase):
             ({"offset": -1}, "bad_value", "offset"),
             ({"having": []}, "unknown_param", "having"),
         ]
+        nested = {"category_id.nope": "res.partner.category"}
         for params, reason, field in cases:
             with self.subTest(params=params):
-                self.assertDetails(self.search(**params), "invalid_params", reason, field)
+                self.assertDetails(
+                    self.search(**params), "invalid_params", reason, field, model=nested.get(field)
+                )
 
     def test_field_access_reasons(self):
         with self.protected_field("res.partner", "function"):
@@ -80,6 +83,23 @@ class TestErrorDetails(O3pMcpApiCase):
         self.assertEqual(response.json()["error"]["details"]["reason"], "unknown_param")
         self.assertNotIn("field", response.json()["error"]["details"])
 
+    def test_unknown_model_and_aggregate_hints(self):
+        self.assertDetails(
+            self.call("describe", {"model": "no.such.model"}), "unknown_model", "unknown_model",
+            model="no.such.model",
+        )
+        details = self.assertDetails(
+            self.call("search", {"model": "ir.config_parameter", "fields": ["key"]}, user="admin"),
+            "unknown_model", "unknown_model", model="ir.config_parameter",
+        )
+        self.assertIn("odoo_find_models", details["hint"])
+        self.assertIn("stored numeric", REASONS["bad_aggregate"])
+        self.assertDetails(
+            self.call("group", {"model": "res.partner", "groupby": ["type"],
+                                "aggregates": ["active_lang_count:sum"]}, user="admin"),
+            "invalid_params", "bad_aggregate", "active_lang_count:sum",
+        )
+
     def test_model_hints(self):
         error = invalid("no_model_access", model="hr.employee", code="access_denied").to_dict()["error"]
         self.assertEqual(error["details"]["hint"], MODEL_HINTS["hr.employee"])
@@ -95,16 +115,18 @@ class TestNotSearchableFields(O3pMcpApiCase):
         def search(**params):
             return self.call("search", {"model": "res.partner", "fields": ["name"], **params}, user="admin")
 
-        for domain, field in (
-            ([["active_lang_count", "=", 0]], "active_lang_count"),
-            ([["contact_address", "ilike", "x"]], "contact_address"),
-            ([["same_vat_partner_id.name", "=", "x"]], "same_vat_partner_id"),
-            ([["parent_id.active_lang_count", ">", 0]], "parent_id.active_lang_count"),
+        for domain, field, owner in (
+            ([["active_lang_count", "=", 0]], "active_lang_count", None),
+            ([["contact_address", "ilike", "x"]], "contact_address", None),
+            ([["same_vat_partner_id.name", "=", "x"]], "same_vat_partner_id", None),
+            ([["parent_id.active_lang_count", ">", 0]], "parent_id.active_lang_count", "res.partner"),
             ([["category_id", "any", [["partner_ids.contact_address", "=", "x"]]]],
-             "category_id.partner_ids.contact_address"),
+             "category_id.partner_ids.contact_address", "res.partner"),
         ):
             with self.subTest(domain=domain):
-                self.assertDetails(search(domain=domain), "invalid_params", "not_searchable", field)
+                self.assertDetails(
+                    search(domain=domain), "invalid_params", "not_searchable", field, model=owner
+                )
         self.assertDetails(search(order="active_lang_count"), "invalid_params", "not_sortable", "active_lang_count")
         self.assertDetails(
             self.call("group", {"model": "res.partner", "groupby": ["active_lang_count"], "aggregates": ["__count"]},
