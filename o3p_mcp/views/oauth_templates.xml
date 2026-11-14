@@ -44,7 +44,7 @@
                 <h1 class="h4 mb-3">Authorization failed</h1>
                 <p class="alert alert-danger" role="alert" t-out="message"/>
                 <a t-if="return_url" t-att-href="return_url" class="btn btn-secondary w-100">
-                    Return to the application
+                    Return to <t t-out="return_target"/>
                 </a>
             </div>
         </t>

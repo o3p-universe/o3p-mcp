@@ -92,14 +92,18 @@ HTTP 429 with `Retry-After`.
   user's groups allow, so an MCP user who asks for `okf.write` gets
   `okf.read` only.
 - A user without the MCP User group sees an error page with a link that
-  returns `error=access_denied` to the client.
+  returns `error=access_denied` to the client. This is checked right after
+  the client and redirect URI, before any other parameter.
 
 The consent page names the client, the user, the MCP server and the scopes,
 and shows where the answer is sent. It cannot be framed. Approving posts the
 form back with Odoo's CSRF token and redirects to the client with `code`,
 `state` and `iss` (RFC 9207); denying redirects with `error=access_denied`.
-Other request errors are redirected to the client with `error`,
-`error_description`, `state` and `iss`.
+For clients created by an administrator, other request errors are
+redirected to the client with `error`, `error_description`, `state` and
+`iss`. Self-registered clients are never redirected to before the user has
+answered: their request errors show the error page with an explicit
+"Return to <host>" link.
 
 ### Token endpoint
 

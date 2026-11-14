@@ -1,5 +1,5 @@
 import hashlib
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from odoo.tests import tagged
 
@@ -121,6 +121,47 @@ class TestAuthorize(O3pMcpHttpCase):
         response = self.get_consent()
         self.assertErrorPage(response, status=403)
         self.assertIn("error=access_denied", response.text)
+
+    def test_user_without_mcp_group_is_never_redirected(self):
+        # Review probe: a self-registered client sending a plain user straight
+        # back to an arbitrary site with a bare client_id.
+        registered = self.url_open(
+            "/o3p_mcp/oauth/register",
+            json={
+                "redirect_uris": ["https://evil.example/landing"],
+                "token_endpoint_auth_method": "none",
+            },
+        ).json()
+        self.authenticate("o3p_mcp_plain", "o3p_mcp_plain")
+        response = self.url_open(
+            f"{AUTHORIZE_URL}?{urlencode({'client_id': registered['client_id']})}",
+            allow_redirects=False,
+        )
+        self.assertErrorPage(response, status=403)
+        self.assertIn("Return to evil.example", response.text)
+        # The group is checked before the rest of the request.
+        self.assertErrorPage(self.get_consent(response_type=None), status=403)
+
+    def test_self_registered_client_errors_are_shown(self):
+        self.client.registration_ip = "203.0.113.5"
+        self.authenticate("o3p_mcp_editor", "o3p_mcp_editor")
+        for overrides, error in (
+            ({"response_type": None}, "unsupported_response_type"),
+            ({"code_challenge": None}, "invalid_request"),
+            ({"code_challenge_method": "plain"}, "invalid_request"),
+            ({"resource": "https://other.example.com/mcp"}, "invalid_target"),
+            ({"scope": "okf.admin"}, "invalid_scope"),
+        ):
+            with self.subTest(error=error):
+                response = self.get_consent(**overrides)
+                self.assertErrorPage(response)
+                self.assertIn("Return to client.example.com", response.text)
+                self.assertIn(f"error={error}", response.text)
+        # An explicit answer is still sent back to the client.
+        self.assertClientError(self.decide("deny"), "access_denied")
+        response = self.decide("approve")
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("code", location_of(response)[1])
 
     def test_approve(self):
         self.authenticate("o3p_mcp_editor", "o3p_mcp_editor")

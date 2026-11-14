@@ -243,9 +243,24 @@ class O3pMcpOauth(models.AbstractModel):
                 _("The redirect URI is not registered for this application."),
             )
         state = params.get("state") or None
+        # A user without MCP access never causes a redirect to the client.
+        allowed = self._scopes_for_user(user)
+        if not allowed:
+            raise AuthorizationError(
+                "access_denied",
+                _("Your account is not allowed to use the MCP server."),
+                redirect_uri,
+                state,
+                show=True,
+            )
+        # Anyone can register a client, so a self-registered client's redirect
+        # URI is only followed once the user has approved or denied.
+        self_registered = bool(client.registration_ip)
 
         def fail(error, description):
-            raise AuthorizationError(error, description, redirect_uri, state)
+            raise AuthorizationError(
+                error, description, redirect_uri, state, show=self_registered
+            )
 
         if params.get("response_type") != "code":
             fail("unsupported_response_type", _("Only response_type=code is supported."))
@@ -278,15 +293,6 @@ class O3pMcpOauth(models.AbstractModel):
             fail(
                 "invalid_scope",
                 _("Supported scopes are %s; okf.read is required.", " ".join(SCOPES)),
-            )
-        allowed = self._scopes_for_user(user)
-        if not allowed:
-            raise AuthorizationError(
-                "access_denied",
-                _("Your account is not allowed to use the MCP server."),
-                redirect_uri,
-                state,
-                show=True,
             )
         return {
             "client": client,
