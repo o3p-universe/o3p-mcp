@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@mfdaves/okf-mcp": "file:../../../okf/okf-mcp-e2e",
+    "@mfdaves/okf-odoo": "file:../../../okf/okf-odoo-e2e",
     "@modelcontextprotocol/client": "2.0.0"
   }
 }

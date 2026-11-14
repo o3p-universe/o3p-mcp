@@ -14,9 +14,11 @@ export function okfBin() {
   return path.join(dir, "bin", "okf-mcp.js");
 }
 
+// `root` serves one bundle; `project` an okf.project.yaml (bundles, tool
+// packs). `env` adds environment variables (the tool pack's credentials).
 export async function startOkf(options) {
-  const { root, port, publicUrl, issuer, introspection, write = false } = options;
-  const args = [okfBin(), "--root", root];
+  const { root, project, port, publicUrl, issuer, introspection, write = false } = options;
+  const args = [okfBin(), ...(project ? ["--project", project] : ["--root", root])];
   if (write) args.push("--write", "--actor", "process:okf-mcp-e2e", "--git-commit");
   args.push(
     "mcp",
@@ -36,6 +38,7 @@ export async function startOkf(options) {
       ...process.env,
       OKF_INTROSPECTION_CLIENT_ID: introspection.client_id,
       OKF_INTROSPECTION_CLIENT_SECRET: introspection.client_secret,
+      ...options.env,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

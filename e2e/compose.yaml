@@ -63,7 +63,6 @@ services:
       - --log-handler=werkzeug:WARNING
     volumes:
       - ../o3p_mcp:/mnt/extra-addons/o3p_mcp:ro
-      - ./setup.py:/mnt/e2e/setup.py:ro
     # Read the bind mounts without relabelling the host files (SELinux hosts).
     security_opt:
       - label:disable

@@ -9,19 +9,23 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 
 import { Browser, parseForms, visibleText } from "./lib/browser.mjs";
+import { runD4 } from "./d4.mjs";
 import { SERVER_IDENTITY, createBundle, git } from "./lib/bundle.mjs";
 import { connectWithToken, signIn, toolJson, toolNames } from "./lib/mcp.mjs";
 import { mcpPost, startOkf, waitFor } from "./lib/okf.mjs";
 import { OAuth, OdooSession, pkce, randomToken } from "./lib/odoo.mjs";
+import { ENV, createProject, runProducer } from "./lib/project.mjs";
 
 const { values: argv } = parseArgs({
   options: {
     setup: { type: "string" },
+    sales: { type: "string" },
     work: { type: "string" },
     only: { type: "string" },
   },
 });
 const setup = JSON.parse(fs.readFileSync(argv.setup, "utf8"));
+const sales = argv.sales ? JSON.parse(fs.readFileSync(argv.sales, "utf8")) : null;
 const only = argv.only ? new Set(argv.only.split(",")) : null;
 const ISSUER = setup.issuer;
 const MCP_PORT = Number(process.env.E2E_MCP_PORT || 18766);
@@ -266,6 +270,7 @@ async function scenario2() {
       await result.client.callTool({
         name: "okf_apply_changes",
         arguments: {
+          bundle: "shop",
           message: "docs: add the returns desk",
           changes: [
             {
@@ -453,6 +458,7 @@ async function scenario6() {
         await result.client.callTool({
           name: "okf_apply_changes",
           arguments: {
+            bundle: "shop",
             message: "docs: written after losing the editor group",
             changes: [{ op: "create", type: "Note", title: "Late write", body: "# Late write\n\nWritten from a cached token.\n" }],
           },
@@ -594,6 +600,14 @@ async function scenario9() {
       `401 challenge scope="${challenge}" → SDK requested "${requested}" → granted "${result.tokens?.scope}"; okf_apply_changes ${tools.includes("okf_apply_changes") ? "listed" : "absent"} — editors cannot write through MCP SDK clients`,
     );
     return `requested "${requested}"`;
+  });
+
+  await check("9a2", "A request without credentials gets a Bearer challenge without an error code (RFC 6750 §3.1)", async () => {
+    const answer = await mcpPost(MCP_URL, {});
+    const challenge = answer.headers.get("www-authenticate") || "";
+    assert(answer.status === 401 && /^Bearer /.test(challenge) && /resource_metadata="/.test(challenge), `answered ${answer.status} ${challenge}`);
+    assert(!/error=/.test(challenge), `challenge carries an error: ${challenge}`);
+    return `WWW-Authenticate: ${challenge.replace(/resource_metadata="[^"]*"/, 'resource_metadata="…"')}`;
   });
 
   // Registrations the way hosted connectors do them.
@@ -912,7 +926,12 @@ async function checkCors() {
     assert(challenge.status === 401 && challenge.headers.get("access-control-allow-origin") === origin && /www-authenticate/i.test(expose), "the 401 challenge is not readable cross-origin");
     return "401 challenge readable (WWW-Authenticate exposed)";
   });
-  await check("9q", "Browser client: metadata discovery works cross-origin (with the SDK's retry without custom headers)", async () => {
+  await check("9q", "Browser client: okf-mcp answers the protected-resource metadata preflight (MCP-Protocol-Version allowed)", async () => {
+    const entry = report.find((item) => item.label.includes("protected"));
+    assert(entry.ok, `preflight HTTP ${entry.status}, allow-origin ${entry.allowOrigin}, allow-headers "${entry.allowHeaders}"`);
+    return `HTTP ${entry.status}, allow-headers "${entry.allowHeaders}"`;
+  });
+  await check("9q2", "Browser client: authorization-server metadata discovery works cross-origin (with the SDK's retry without custom headers)", async () => {
     const notes = [];
     for (const entry of report.filter((item) => item.label.includes("metadata"))) {
       if (entry.ok) continue;
@@ -986,12 +1005,28 @@ async function registrationLimit() {
 
 async function main() {
   const work = argv.work;
-  state.bundle = createBundle(path.join(work, "shop"));
+  state.project = createProject(path.join(work, "project"), { issuer: ISSUER, database: "o3p_e2e" });
+  state.bundle = state.project.shop;
   const otherBundle = createBundle(path.join(work, "other"));
+  if (sales) {
+    await check("D-p", "The okf-odoo producer generates the `odoo` bundle into the okf project once", async () => {
+      const { receipt, ms } = runProducer(state.project, sales.producer_api_key);
+      assert(receipt.applied && receipt.valid, `receipt ${JSON.stringify(receipt).slice(0, 200)}`);
+      const s = receipt.summary;
+      return `${s.files} files (${s.models} models, ${s.fields} fields, ${s.groups} groups, ${s.accessEntries} access entries) in ${Math.round(ms)} ms`;
+    });
+  }
   const common = { issuer: ISSUER, introspection: setup.introspection };
   const servers = [];
   try {
-    const primary = await startOkf({ ...common, root: state.bundle, port: MCP_PORT, publicUrl: MCP_URL, write: true });
+    const primary = await startOkf({
+      ...common,
+      project: state.project.file,
+      port: MCP_PORT,
+      publicUrl: MCP_URL,
+      write: true,
+      env: { [ENV.clientId]: setup.introspection.client_id, [ENV.clientSecret]: setup.introspection.client_secret },
+    });
     servers.push(primary);
     info("okf", `node ${primary.args.join(" ")}`);
     servers.push(await startOkf({ ...common, root: otherBundle, port: MCP2_PORT, publicUrl: MCP2_URL }));
@@ -1005,6 +1040,25 @@ async function main() {
     if (wanted(7)) await scenario7();
     if (wanted(8)) await scenario8();
     if (wanted(9)) await scenario9();
+    if (sales && wanted("d")) {
+      await runD4({
+        check,
+        info,
+        assert,
+        setup,
+        sales,
+        oauth,
+        state,
+        ISSUER,
+        MCP_URL,
+        toolJson,
+        mcpPost,
+        adminSession,
+        sharedClient: () => sharedClient,
+        signInAs: (login, options = {}) =>
+          timedSignIn({ mcpUrl: MCP_URL, issuer: ISSUER, login, password: PASSWORD, clientInformation: sharedClient, ...options }),
+      });
+    }
     // The checks that wait for okf-mcp's cache run side by side.
     const expiry = wanted(9) ? await expiryPrepare() : null;
     await Promise.all([
