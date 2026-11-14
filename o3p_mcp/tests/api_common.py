@@ -6,6 +6,7 @@ from unittest.mock import patch
 from odoo import Command
 from odoo.tests import HttpCase, new_test_user
 
+from ..models.oauth import set_config
 from ..models.api import ERRORS
 from .common import RESOURCE, O3pMcpCommon
 
@@ -32,7 +33,7 @@ class O3pMcpApiCase(O3pMcpCommon, HttpCase):
     def setUpClass(cls):
         super().setUpClass()
         env = cls.env
-        env["ir.config_parameter"].sudo().set_str("o3p_mcp.resource_url", RESOURCE)
+        set_config(env, "o3p_mcp.resource_url", RESOURCE)
         cls.server = env["o3p.mcp.client"].create(
             {
                 "name": "MCP server",
@@ -42,7 +43,7 @@ class O3pMcpApiCase(O3pMcpCommon, HttpCase):
         )
         cls.server_secret = cls.server._set_new_secret()
         cls.admin = env.ref("base.user_admin")
-        cls.admin.write({"group_ids": [Command.link(cls.user_group.id)]})
+        cls.admin.write({"groups_id": [Command.link(cls.user_group.id)]})
         cls.restricted = new_test_user(
             env,
             "o3p_mcp_restricted",
@@ -66,12 +67,17 @@ class O3pMcpApiCase(O3pMcpCommon, HttpCase):
         cls.hidden = Partner.create({"name": "MCPT Hidden One", "color": 100})
         cls.hidden2 = Partner.create({"name": "MCPT Hidden Two", "color": 200})
         cls.restricted.partner_id.category_id = [Command.link(cls.visible.id)]
-        env["ir.access"].create(
+        # A global record rule (Odoo 18: ir.rule) that only narrows the
+        # restricted user's reads.
+        env["ir.rule"].create(
             {
                 "name": "o3p_mcp test: the restricted user reads visible partners only",
                 "model_id": env.ref("base.model_res_partner").id,
-                "operation": "r",
-                "domain": (
+                "perm_read": True,
+                "perm_write": False,
+                "perm_create": False,
+                "perm_unlink": False,
+                "domain_force": (
                     f"[('category_id', 'in', [{cls.visible.id}])] "
                     f"if user.id == {cls.restricted.id} else []"
                 ),

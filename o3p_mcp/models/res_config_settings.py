@@ -18,7 +18,10 @@ from .oauth import (
     DEFAULT_REFRESH_TOKEN_DAYS,
     INTROSPECT_PATH,
     METADATA_PATH,
+    get_config,
+    get_config_int,
     is_valid_issuer,
+    set_config,
 )
 
 
@@ -131,30 +134,29 @@ class ResConfigSettings(models.TransientModel):
     @api.model
     def get_values(self):
         values = super().get_values()
-        params = self.env["ir.config_parameter"].sudo()
         values.update(
             o3p_mcp_issuer=self.env["o3p.mcp.oauth"]._issuer(),
-            o3p_mcp_resource_url=params.get_str("o3p_mcp.resource_url", ""),
-            o3p_mcp_access_token_minutes=params.get_int(
+            o3p_mcp_resource_url=get_config(self.env, "o3p_mcp.resource_url", ""),
+            o3p_mcp_access_token_minutes=get_config_int(self.env,
                 "o3p_mcp.access_token_minutes", DEFAULT_ACCESS_TOKEN_MINUTES
             ),
-            o3p_mcp_refresh_token_days=params.get_int(
+            o3p_mcp_refresh_token_days=get_config_int(self.env,
                 "o3p_mcp.refresh_token_days", DEFAULT_REFRESH_TOKEN_DAYS
             ),
             o3p_mcp_api_denied_models="\n".join(
-                patterns(params.get_str("o3p_mcp.api_denied_models"), DEFAULT_DENIED_MODELS)
+                patterns(get_config(self.env, "o3p_mcp.api_denied_models"), DEFAULT_DENIED_MODELS)
             ),
             o3p_mcp_api_denied_fields="\n".join(
-                patterns(params.get_str("o3p_mcp.api_denied_fields"), DEFAULT_DENIED_FIELDS)
+                patterns(get_config(self.env, "o3p_mcp.api_denied_fields"), DEFAULT_DENIED_FIELDS)
             ),
-            o3p_mcp_api_max_response_kb=params.get_int(
+            o3p_mcp_api_max_response_kb=get_config_int(self.env,
                 "o3p_mcp.api_max_response_bytes", DEFAULT_MAX_RESPONSE_BYTES
             )
             // 1000,
-            o3p_mcp_api_timeout_seconds=params.get_int(
+            o3p_mcp_api_timeout_seconds=get_config_int(self.env,
                 "o3p_mcp.api_timeout_seconds", DEFAULT_TIMEOUT_SECONDS
             ),
-            o3p_mcp_api_log_days=params.get_int("o3p_mcp.api_log_days", DEFAULT_LOG_DAYS),
+            o3p_mcp_api_log_days=get_config_int(self.env, "o3p_mcp.api_log_days", DEFAULT_LOG_DAYS),
         )
         return values
 
@@ -200,22 +202,21 @@ class ResConfigSettings(models.TransientModel):
         if not 1 <= self.o3p_mcp_api_log_days <= 3650:
             raise UserError(self.env._("The call log must be kept between 1 and 3650 days."))
         result = super().set_values()
-        params = self.env["ir.config_parameter"].sudo()
-        params.set_str(
+        set_config(self.env,
             "o3p_mcp.api_denied_models",
             "\n".join(patterns(self.o3p_mcp_api_denied_models, DEFAULT_DENIED_MODELS)),
         )
-        params.set_str(
+        set_config(self.env,
             "o3p_mcp.api_denied_fields",
             "\n".join(patterns(self.o3p_mcp_api_denied_fields, DEFAULT_DENIED_FIELDS)),
         )
-        params.set_int("o3p_mcp.api_max_response_bytes", self.o3p_mcp_api_max_response_kb * 1000)
-        params.set_int("o3p_mcp.api_timeout_seconds", self.o3p_mcp_api_timeout_seconds)
-        params.set_int("o3p_mcp.api_log_days", self.o3p_mcp_api_log_days)
-        params.set_str("o3p_mcp.issuer", issuer)
-        params.set_str("o3p_mcp.resource_url", resource_url)
-        params.set_int("o3p_mcp.access_token_minutes", self.o3p_mcp_access_token_minutes)
-        params.set_int("o3p_mcp.refresh_token_days", self.o3p_mcp_refresh_token_days)
+        set_config(self.env, "o3p_mcp.api_max_response_bytes", self.o3p_mcp_api_max_response_kb * 1000)
+        set_config(self.env, "o3p_mcp.api_timeout_seconds", self.o3p_mcp_api_timeout_seconds)
+        set_config(self.env, "o3p_mcp.api_log_days", self.o3p_mcp_api_log_days)
+        set_config(self.env, "o3p_mcp.issuer", issuer)
+        set_config(self.env, "o3p_mcp.resource_url", resource_url)
+        set_config(self.env, "o3p_mcp.access_token_minutes", self.o3p_mcp_access_token_minutes)
+        set_config(self.env, "o3p_mcp.refresh_token_days", self.o3p_mcp_refresh_token_days)
         return result
 
     def action_o3p_mcp_rotate_credentials(self):

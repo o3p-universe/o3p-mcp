@@ -1,0 +1,5 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_o3p_mcp_client_system,o3p.mcp.client system,model_o3p_mcp_client,base.group_system,1,1,1,1
+access_o3p_mcp_code_system,o3p.mcp.code system,model_o3p_mcp_code,base.group_system,1,1,1,1
+access_o3p_mcp_token_system,o3p.mcp.token system,model_o3p_mcp_token,base.group_system,1,1,1,1
+access_o3p_mcp_api_log_system,o3p.mcp.api.log system,model_o3p_mcp_api_log,base.group_system,1,1,1,1

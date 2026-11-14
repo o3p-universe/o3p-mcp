@@ -1,15 +1,29 @@
+import datetime
 import fnmatch
 import logging
 import re
+from zoneinfo import ZoneInfo, available_timezones
+
+import babel
+import babel.dates
 
 import psycopg2
 from psycopg2 import errors as pg_errors
 
 from odoo import api, fields, models
 from odoo.exceptions import AccessError, UserError, ValidationError
-from odoo.fields import Domain
+from odoo.models import READ_GROUP_DISPLAY_FORMAT, READ_GROUP_TIME_GRANULARITY
+from odoo.tools import DEFAULT_SERVER_DATE_FORMAT, DEFAULT_SERVER_DATETIME_FORMAT, date_utils, get_lang
 
-from .oauth import SCOPE_ODOO_READ, SCOPE_READ, find_by_secret, parse_scope, same_resource
+from .oauth import (
+    SCOPE_ODOO_READ,
+    SCOPE_READ,
+    find_by_secret,
+    get_config,
+    get_config_int,
+    parse_scope,
+    same_resource,
+)
 
 
 _logger = logging.getLogger(__name__)
@@ -53,6 +67,7 @@ NUMERIC_TYPES = frozenset({"integer", "float", "monetary"})
 NUMERIC_AGGREGATES = frozenset({"sum", "avg", "min", "max"})
 COUNT_AGGREGATES = frozenset({"count", "count_distinct"})
 DATE_GRANULARITIES = frozenset({"day", "week", "month", "quarter", "year"})
+TIMEZONES = frozenset(available_timezones())
 
 MSG_FIELDS = "A requested field is unknown, hidden or not readable."
 MSG_DOMAIN = (
@@ -143,11 +158,10 @@ class O3pMcpApi(models.AbstractModel):
 
     @api.model
     def _setting(self, key, default):
-        params = self.env["ir.config_parameter"].sudo()
         if isinstance(default, int):
-            value = params.get_int(key, default)
+            value = get_config_int(self.env, key, default)
             return value if value > 0 else default
-        return params.get_str(key, "")
+        return get_config(self.env, key)
 
     @api.model
     def _denied_model_patterns(self):
@@ -294,7 +308,7 @@ class O3pMcpApi(models.AbstractModel):
         return {
             name: field
             for name, field in model._fields.items()
-            if model.has_field_access(field, "read") and not self._field_denied(field)
+            if field.is_accessible(model.env) and not self._field_denied(field)
         }
 
     # ------------------------------------------------------------------
@@ -344,7 +358,7 @@ class O3pMcpApi(models.AbstractModel):
                 break
             if (
                 not field.relational
-                or field.bypass_search_access
+                or field.auto_join
                 or not self._exposed_model(field.comodel_name)
                 or not current.env[field.comodel_name].has_access("read")
             ):
@@ -395,10 +409,20 @@ class O3pMcpApi(models.AbstractModel):
             else:
                 self._path_model(model, path)
                 self._check_operand(operand)
-        try:
-            return Domain(value)
-        except (ValueError, TypeError) as exc:
-            raise ApiError("invalid_params", MSG_DOMAIN) from exc
+        # Prefix notation: every "&" and "|" needs two operands, "!" one; the
+        # remaining terms are joined with an implicit "&".
+        operands = 0
+        for item in reversed(value):
+            if item in ("&", "|"):
+                if operands < 2:
+                    raise ApiError("invalid_params", MSG_DOMAIN)
+                operands -= 1
+            elif item == "!":
+                if operands < 1:
+                    raise ApiError("invalid_params", MSG_DOMAIN)
+            else:
+                operands += 1
+        return value
 
     def _order_param(self, model, value):
         """Return a normalised ``field [asc|desc], …`` order, or None."""
@@ -579,11 +603,56 @@ class O3pMcpApi(models.AbstractModel):
         aggregates = self._aggregates_param(model, params.get("aggregates"))
         order = self._group_order_param(params.get("order"), {*groupby, *aggregates})
         limit = self._int_param(params.get("limit"), DEFAULT_LIMIT, 1, MAX_GROUPS)
-        # No group expansion or temporal filling: every group comes from the
-        # records the domain finds for the user.
-        groups = model.with_context(read_group_expand=False, fill_temporal=False).formatted_read_group(
-            domain, groupby, aggregates, order=order, limit=limit
-        )
-        keys = (*groupby, *aggregates)
-        result = [{key: group[key] for key in keys} for group in groups]
+        # Every group comes from the records the domain finds for the user;
+        # values are formatted as Odoo 20's formatted_read_group does.
+        rows = model._read_group(domain, groupby, aggregates, order=order, limit=limit)
+        formatters = [self._groupby_formatter(model, spec) for spec in groupby]
+        result = []
+        for row in rows:
+            group = {
+                spec: formatter(value)
+                for spec, formatter, value in zip(groupby, formatters, row, strict=False)
+            }
+            group.update(zip(aggregates, row[len(groupby):], strict=True))
+            result.append(group)
         return {"groups": result}, model._name, len(result)
+
+    @staticmethod
+    def _groupby_formatter(model, spec):
+        """Return the formatter of one groupby value (Odoo 20 web format)."""
+        name, _colon, granularity = spec.partition(":")
+        field = model._fields[name]
+        if field.type in ("many2one", "many2many"):
+            return lambda value: (value.id, value.sudo().display_name) if value else False
+        if field.type in ("date", "datetime") and granularity in READ_GROUP_TIME_GRANULARITY:
+            locale = get_lang(model.env).code
+            server_format = (
+                DEFAULT_SERVER_DATETIME_FORMAT
+                if field.type == "datetime"
+                else DEFAULT_SERVER_DATE_FORMAT
+            )
+            display_format = READ_GROUP_DISPLAY_FORMAT[granularity]
+
+            def format_period(value):
+                if not value:
+                    return value
+                range_start = value
+                if field.type == "datetime":
+                    tzinfo = None
+                    if model.env.context.get("tz") in TIMEZONES:
+                        tzinfo = ZoneInfo(model.env.context["tz"])
+                        range_start = range_start.replace(tzinfo=tzinfo).astimezone(
+                            datetime.timezone.utc
+                        )
+                    label = babel.dates.format_datetime(
+                        range_start, format=display_format, tzinfo=tzinfo, locale=locale
+                    )
+                else:
+                    label = babel.dates.format_date(value, format=display_format, locale=locale)
+                if granularity == "week":
+                    year, week = date_utils.weeknumber(babel.Locale.parse(locale), value)
+                    label = f"W{week} {year:04}"
+                return (range_start.strftime(server_format), label)
+
+            return format_period
+        return lambda value: value

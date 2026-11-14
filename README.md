@@ -1,12 +1,18 @@
 # O3P MCP
 
-Odoo 20 Community addon that makes Odoo an OAuth 2.1 authorization server for
+Odoo 18 Community addon that makes Odoo an OAuth 2.1 authorization server for
 an external MCP server. MCP clients sign in with an Odoo account; the MCP
 server checks every access token through Odoo's introspection endpoint.
 
+This is the `18.0` branch. The `20.0` branch has the same features for
+Odoo 20; the protocol, the introspection answer and the data API are
+identical on both. Differences specific to Odoo 18 are listed under
+"Odoo 18 notes".
+
 ## Groups and scopes
 
-The addon adds an **MCP** privilege with two groups:
+The addon adds an **MCP** application category with two groups, shown on
+the user form as one MCP selection:
 
 | Group | Scopes granted |
 |---|---|
@@ -392,15 +398,36 @@ at once in Odoo (the MCP server may cache an answer for up to a minute).
   alone: serve a single database or set `dbfilter` so the host name selects
   it.
 
+## Odoo 18 notes
+
+- The groups belong to the **MCP** module category (Odoo 20 groups them
+  under an MCP privilege). Access to the addon's own records is granted by
+  `ir.model.access` to Settings administrators only.
+- Odoo 18 has no light and regular internal users: a user is internal or
+  portal. The MCP groups imply no other group, so giving them to a user
+  changes neither the user type nor any right on Odoo records.
+- The data API applies Odoo 18's access rights (`ir.model.access`), record
+  rules (`ir.rule`) and field groups, with the same results as on Odoo 20.
+  Group values are formatted as on Odoo 20 (`[id, name]` for relations,
+  `[start, label]` for dates).
+- The daily clean-up deletes up to 1,000 rows per call; while rows remain,
+  Odoo calls it again up to 10 times in the same run, and anything left
+  waits for the next day.
+- The index used by the registration limit is created when the addon is
+  installed and kept as it is on later upgrades.
+
 ## Installation
 
 Copy the `o3p_mcp` folder into an addons path and install **o3p - mcp**, or use
-the O3P installer with `o3p-mcp.o3p.json`. The addon depends on `base_setup`
-and `web` and uses the Python `requests` package.
+the O3P installer with `o3p-mcp.o3p.json`, which picks the branch matching the
+Odoo version (`18.0`). The addon depends on `base_setup` and `web` and uses
+the Python `requests` and `idna` packages (`idna` comes with `requests`).
 
 ## Tests
 
-`scripts/run-tests.sh` starts PostgreSQL 17 and Odoo 20 with Docker Compose,
-installs the addon in a throw-away database, runs its tests and removes the
-containers again. An optional argument replaces the default test tags
-(`/o3p_mcp`).
+`scripts/run-tests.sh` starts PostgreSQL 17 and the Odoo image of the
+manifest's series (`odoo:18.0` here) with Docker Compose, installs the addon
+in a throw-away database, runs its tests and removes the containers again.
+`ODOO_SERIES=20.0` selects another image; the Compose project is
+`o3p-mcp-test18` for Odoo 18. An optional argument replaces the default test
+tags (`/o3p_mcp`).

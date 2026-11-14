@@ -6,7 +6,7 @@ import requests
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tests import Form, TransactionCase, new_test_user, tagged
 
-from ..models.oauth import OAuthError
+from ..models.oauth import OAuthError, get_config, get_config_int, set_config
 from ..models.res_config_settings import health_url
 from .common import RESOURCE, O3pMcpCommon
 
@@ -28,16 +28,16 @@ class TestSettings(O3pMcpCommon, TransactionCase):
 
     def test_values_are_stored_as_config_parameters(self):
         params = self.env["ir.config_parameter"]
-        self.assertEqual(params.get_int("o3p_mcp.access_token_minutes"), 60)
-        self.assertEqual(params.get_int("o3p_mcp.refresh_token_days"), 30)
+        self.assertEqual(get_config_int(params.env, "o3p_mcp.access_token_minutes"), 60)
+        self.assertEqual(get_config_int(params.env, "o3p_mcp.refresh_token_days"), 30)
         with Form(self.env["res.config.settings"]) as form:
             form.o3p_mcp_resource_url = f" {RESOURCE} "
             form.o3p_mcp_access_token_minutes = 15
             form.o3p_mcp_refresh_token_days = 7
         form.record.execute()
-        self.assertEqual(params.get_str("o3p_mcp.resource_url"), RESOURCE)
-        self.assertEqual(params.get_int("o3p_mcp.access_token_minutes"), 15)
-        self.assertEqual(params.get_int("o3p_mcp.refresh_token_days"), 7)
+        self.assertEqual(get_config(params.env, "o3p_mcp.resource_url"), RESOURCE)
+        self.assertEqual(get_config_int(params.env, "o3p_mcp.access_token_minutes"), 15)
+        self.assertEqual(get_config_int(params.env, "o3p_mcp.refresh_token_days"), 7)
         oauth = self.env["o3p.mcp.oauth"]
         self.assertEqual(oauth._resource_url(), RESOURCE)
         self.assertEqual(oauth._access_token_lifetime().total_seconds(), 15 * 60)
@@ -60,12 +60,12 @@ class TestSettings(O3pMcpCommon, TransactionCase):
         params = self.env["ir.config_parameter"]
         oauth = self.env["o3p.mcp.oauth"]
         # Initialised from web.base.url at install.
-        self.assertTrue(params.get_str("o3p_mcp.issuer"))
-        params.set_str("o3p_mcp.issuer", "https://odoo.example.com")
-        params.set_str("web.base.url", "https://elsewhere.example.com")
+        self.assertTrue(get_config(params.env, "o3p_mcp.issuer"))
+        set_config(params.env, "o3p_mcp.issuer", "https://odoo.example.com")
+        set_config(params.env, "web.base.url", "https://elsewhere.example.com")
         oauth._init_issuer()
         self.assertEqual(oauth._issuer(), "https://odoo.example.com")
-        params.set_str("o3p_mcp.issuer", "")
+        set_config(params.env, "o3p_mcp.issuer", "")
         oauth._init_issuer()
         self.assertEqual(oauth._issuer(), "https://elsewhere.example.com")
         for issuer in (
@@ -85,11 +85,11 @@ class TestSettings(O3pMcpCommon, TransactionCase):
             ("https://odoo.example.com:8443", "https://odoo.example.com:8443"),
         ):
             self.env["res.config.settings"].create({"o3p_mcp_issuer": issuer}).execute()
-            self.assertEqual(params.get_str("o3p_mcp.issuer"), stored)
+            self.assertEqual(get_config(params.env, "o3p_mcp.issuer"), stored)
         # An inherited value that would be refused does not block other settings.
-        params.set_str("o3p_mcp.issuer", "http://odoo.example.com")
+        set_config(params.env, "o3p_mcp.issuer", "http://odoo.example.com")
         self.env["res.config.settings"].create({"o3p_mcp_access_token_minutes": 30}).execute()
-        self.assertEqual(params.get_int("o3p_mcp.access_token_minutes"), 30)
+        self.assertEqual(get_config_int(params.env, "o3p_mcp.access_token_minutes"), 30)
         self.assertEqual(oauth._issuer(), "http://odoo.example.com")
 
     def test_invalid_values_are_refused(self):
@@ -180,13 +180,13 @@ class TestSettings(O3pMcpCommon, TransactionCase):
             }
         ).execute()
         self.assertEqual(
-            params.get_str("o3p_mcp.api_denied_models"), "o3p.mcp.*\nir.config_parameter\nres.bank"
+            get_config(params.env, "o3p_mcp.api_denied_models"), "o3p.mcp.*\nir.config_parameter\nres.bank"
         )
         # An empty list restores the default.
-        self.assertIn("*password*", params.get_str("o3p_mcp.api_denied_fields"))
-        self.assertEqual(params.get_int("o3p_mcp.api_max_response_bytes"), 50_000)
-        self.assertEqual(params.get_int("o3p_mcp.api_timeout_seconds"), 5)
-        self.assertEqual(params.get_int("o3p_mcp.api_log_days"), 7)
+        self.assertIn("*password*", get_config(params.env, "o3p_mcp.api_denied_fields"))
+        self.assertEqual(get_config_int(params.env, "o3p_mcp.api_max_response_bytes"), 50_000)
+        self.assertEqual(get_config_int(params.env, "o3p_mcp.api_timeout_seconds"), 5)
+        self.assertEqual(get_config_int(params.env, "o3p_mcp.api_log_days"), 7)
         api = self.env["o3p.mcp.api"]
         self.assertTrue(api._model_denied("res.bank"))
         self.assertEqual(api._timeout_seconds(), 5)

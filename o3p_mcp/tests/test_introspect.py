@@ -4,7 +4,7 @@ from pathlib import Path
 
 from odoo.tests import tagged
 
-from .common import REDIRECT_URI, RESOURCE, LogCapture
+from .common import REDIRECT_URI, RESOURCE, LogCapture, url_request
 from .test_token import INACTIVE, O3pMcpTokenCase, basic
 
 
@@ -185,9 +185,10 @@ class TestRevocation(O3pMcpResourceServerCase):
         self.assertTrue(self.answer(tokens["access_token"])["active"])
 
     def test_cors(self):
-        response = self.url_open(
+        response = url_request(
+            self,
+            "OPTIONS",
             REVOKE_URL,
-            method="OPTIONS",
             headers={
                 "Origin": "https://inspector.example.com",
                 "Access-Control-Request-Method": "POST",
@@ -204,7 +205,9 @@ class TestRevocation(O3pMcpResourceServerCase):
 class TestNoSecretsInLogs(O3pMcpResourceServerCase):
     def test_flow_logs_no_secret(self):
         with LogCapture() as capture:
-            registered = self.url_open(
+            registered = url_request(
+                self,
+                "POST",
                 "/o3p_mcp/oauth/register",
                 json={"redirect_uris": [REDIRECT_URI], "client_name": "Logged"},
             ).json()

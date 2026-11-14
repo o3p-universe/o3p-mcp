@@ -237,7 +237,7 @@ class TestTokens(O3pMcpCommon, TransactionCase):
         _token, response = self.issue()
         self.editor.write(
             {
-                "group_ids": [
+                "groups_id": [
                     Command.unlink(self.env.ref("base.group_user").id),
                     Command.link(self.env.ref("base.group_portal").id),
                 ]
@@ -330,9 +330,9 @@ class TestTokens(O3pMcpCommon, TransactionCase):
         past = fields.Datetime.now() - timedelta(minutes=1)
         expired.write({"expires_at": past, "refresh_expires_at": past})
         cron_class = type(self.env["ir.cron"])
-        with patch.object(cron_class, "_commit_progress", return_value=60.0) as progress:
+        with patch.object(cron_class, "_notify_progress") as progress:
             self.Token._cron_purge()
-        progress.assert_called_once_with(1, remaining=0)
+        progress.assert_called_once_with(done=1, remaining=0)
         self.assertFalse(expired.exists())
 
     def test_code_is_single_use(self):

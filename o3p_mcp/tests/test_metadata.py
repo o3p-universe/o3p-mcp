@@ -5,7 +5,15 @@ import re
 from odoo.tests import HttpCase, TransactionCase, tagged
 
 from ..models.mcp_client import address_bucket
-from ..models.oauth import OAuthError, display_target, is_allowed_redirect_uri, redirect_uri_matches
+from ..models.oauth import (
+    OAuthError,
+    display_target,
+    get_config,
+    is_allowed_redirect_uri,
+    redirect_uri_matches,
+    set_config,
+)
+from .common import url_request
 
 
 METADATA_URL = "/.well-known/oauth-authorization-server"
@@ -120,7 +128,7 @@ class TestMetadataAndRegistration(HttpCase):
         )
 
     def test_metadata(self):
-        self.env["ir.config_parameter"].sudo().set_str(
+        set_config(self.env, 
             "o3p_mcp.issuer", "https://odoo.example.com/"
         )
         response = self.url_open(METADATA_URL)
@@ -162,8 +170,8 @@ class TestMetadataAndRegistration(HttpCase):
         # Review probe: Odoo rewrites web.base.url when an administrator signs
         # in on another host; the issuer must not follow it.
         params = self.env["ir.config_parameter"].sudo()
-        params.set_str("web.base.url", "https://odoo.example.com")
-        params.set_str("o3p_mcp.issuer", "https://odoo.example.com")
+        set_config(params.env, "web.base.url", "https://odoo.example.com")
+        set_config(params.env, "o3p_mcp.issuer", "https://odoo.example.com")
         before = self.url_open(METADATA_URL).json()
         page = self.url_open("/web/login")
         csrf = re.search(r'name="csrf_token" value="([^"]+)"', page.text).group(1)
@@ -173,7 +181,7 @@ class TestMetadataAndRegistration(HttpCase):
             allow_redirects=False,
         )
         self.assertEqual(login.status_code, 303)
-        self.assertNotEqual(params.get_str("web.base.url"), "https://odoo.example.com")
+        self.assertNotEqual(get_config(params.env, "web.base.url"), "https://odoo.example.com")
         after = self.url_open(METADATA_URL).json()
         self.assertEqual(after, before)
         self.assertEqual(after["issuer"], "https://odoo.example.com")
@@ -181,9 +189,10 @@ class TestMetadataAndRegistration(HttpCase):
     def test_cors_preflight(self):
         for url in (METADATA_URL, REGISTER_URL):
             with self.subTest(url=url):
-                response = self.url_open(
+                response = url_request(
+                    self,
+                    "OPTIONS",
                     url,
-                    method="OPTIONS",
                     headers={
                         "Origin": "https://inspector.example.com",
                         "Access-Control-Request-Method": "POST",

@@ -6,9 +6,9 @@ from .common import O3pMcpCommon
 @tagged("post_install", "-at_install")
 class TestInstall(O3pMcpCommon, TransactionCase):
     def test_groups_and_implication(self):
-        privilege = self.env.ref("o3p_mcp.res_groups_privilege_mcp")
-        self.assertEqual(self.user_group.privilege_id, privilege)
-        self.assertEqual(self.editor_group.privilege_id, privilege)
+        category = self.env.ref("o3p_mcp.module_category_mcp")
+        self.assertEqual(self.user_group.category_id, category)
+        self.assertEqual(self.editor_group.category_id, category)
         self.assertIn(self.user_group, self.editor_group.implied_ids)
         editor_only = new_test_user(
             self.env,
@@ -22,9 +22,15 @@ class TestInstall(O3pMcpCommon, TransactionCase):
         )
         self.assertFalse(self.reader.has_group("o3p_mcp.group_mcp_editor"))
 
-    def test_mcp_groups_keep_light_users_light(self):
-        self.assertFalse(self.editor.has_group("base.group_user_regular"))
-        self.assertEqual(self.editor.role, "light_user")
+    def test_mcp_groups_grant_nothing_else(self):
+        # Odoo 18 has no light or regular users: the user type is internal or
+        # portal (share). The MCP groups imply no other group, so holding them
+        # changes neither the type nor any right on Odoo records.
+        self.assertFalse(self.user_group.implied_ids)
+        self.assertEqual(self.editor_group.implied_ids, self.user_group)
+        self.assertFalse(self.editor.share)
+        self.assertFalse(self.user_group.model_access)
+        self.assertFalse(self.editor_group.model_access)
 
     def test_scopes_for_user(self):
         oauth = self.env["o3p.mcp.oauth"]

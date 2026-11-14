@@ -85,14 +85,10 @@ class O3pMcpToken(models.Model):
         compute="_compute_state",
     )
 
-    _access_hash_unique = models.Constraint(
-        "UNIQUE (access_hash)",
-        "Access tokens must be unique.",
-    )
-    _refresh_hash_unique = models.Constraint(
-        "UNIQUE (refresh_hash)",
-        "Refresh tokens must be unique.",
-    )
+    _sql_constraints = [
+        ("access_hash_unique", "UNIQUE (access_hash)", "Access tokens must be unique."),
+        ("refresh_hash_unique", "UNIQUE (refresh_hash)", "Refresh tokens must be unique."),
+    ]
 
     @api.depends("expires_at", "refresh_expires_at", "rotated_at", "revoked_at")
     def _compute_state(self):
@@ -363,11 +359,9 @@ class O3pMcpToken(models.Model):
 
     @api.model
     def _cron_purge(self):
-        cron = self.env["ir.cron"]
-        while True:
-            purged = self._purge_expired()
-            if purged < PURGE_BATCH_SIZE:
-                cron._commit_progress(purged, remaining=0)
-                return
-            if not cron._commit_progress(purged):
-                return
+        # Odoo 18: one batch per call. While the progress reports work left,
+        # the cron runner commits and calls again (up to 10 times per run).
+        purged = self._purge_expired()
+        self.env["ir.cron"]._notify_progress(
+            done=purged, remaining=1 if purged >= PURGE_BATCH_SIZE else 0
+        )

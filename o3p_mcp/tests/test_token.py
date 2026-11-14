@@ -4,7 +4,7 @@ from datetime import timedelta
 from odoo import fields
 from odoo.tests import tagged
 
-from .common import REDIRECT_URI, RESOURCE, O3pMcpHttpCase, location_of
+from .common import REDIRECT_URI, RESOURCE, O3pMcpHttpCase, location_of, url_request
 
 
 TOKEN_URL = "/o3p_mcp/oauth/token"
@@ -268,9 +268,10 @@ class TestTokenEndpoint(O3pMcpTokenCase):
         self.assertEqual(response.status_code, 200, response.text)
 
     def test_cors_and_methods(self):
-        preflight = self.url_open(
+        preflight = url_request(
+            self,
+            "OPTIONS",
             TOKEN_URL,
-            method="OPTIONS",
             headers={
                 "Origin": "https://inspector.example.com",
                 "Access-Control-Request-Method": "POST",

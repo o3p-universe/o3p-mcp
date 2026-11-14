@@ -61,6 +61,26 @@ DNS_LABEL_RE = re.compile(r"(?!-)[a-z0-9-]{1,63}(?<!-)")
 MAX_HOSTNAME_LENGTH = 253
 
 
+def get_config(env, key, default=""):
+    """Return the ``ir.config_parameter`` text value of ``key`` or ``default``."""
+    value = env["ir.config_parameter"].sudo().get_param(key)
+    return value if value else default
+
+
+def get_config_int(env, key, default=0):
+    """Return the integer value of ``key``, or ``default`` if unset or not a number."""
+    try:
+        return int(get_config(env, key, ""))
+    except ValueError:
+        return default
+
+
+def set_config(env, key, value):
+    """Store ``value`` under ``key``; an empty value removes the parameter."""
+    value = "" if value is None or value is False else str(value)
+    env["ir.config_parameter"].sudo().set_param(key, value or False)
+
+
 def new_secret():
     """Return a new random 256-bit secret as URL-safe text."""
     return secrets.token_urlsafe(32)
@@ -307,9 +327,7 @@ class O3pMcpOauth(models.AbstractModel):
     @api.model
     def _resource_url(self):
         """Return the public MCP URL: the only resource and token audience."""
-        return (
-            self.env["ir.config_parameter"].sudo().get_str("o3p_mcp.resource_url") or ""
-        ).strip()
+        return get_config(self.env, "o3p_mcp.resource_url").strip()
 
     @api.model
     def _scope_descriptions(self, scopes):
@@ -425,17 +443,17 @@ class O3pMcpOauth(models.AbstractModel):
         rewrites ``web.base.url`` whenever an administrator signs in, which
         would change the issuer, the endpoints and ``iss`` under the clients.
         """
-        params = self.env["ir.config_parameter"].sudo()
-        issuer = params.get_str("o3p_mcp.issuer") or params.get_str("web.base.url")
-        return (issuer or "").strip().rstrip("/")
+        issuer = get_config(self.env, "o3p_mcp.issuer") or get_config(
+            self.env, "web.base.url"
+        )
+        return issuer.strip().rstrip("/")
 
     @api.model
     def _init_issuer(self):
         """Initialise the issuer from ``web.base.url`` unless already set."""
-        params = self.env["ir.config_parameter"].sudo()
-        if not params.get_str("o3p_mcp.issuer"):
-            base_url = params.get_str("web.base.url") or ""
-            params.set_str("o3p_mcp.issuer", base_url.strip().rstrip("/"))
+        if not get_config(self.env, "o3p_mcp.issuer"):
+            base_url = get_config(self.env, "web.base.url")
+            set_config(self.env, "o3p_mcp.issuer", base_url.strip().rstrip("/"))
 
     @api.model
     def _metadata(self):
@@ -461,18 +479,14 @@ class O3pMcpOauth(models.AbstractModel):
 
     @api.model
     def _access_token_lifetime(self):
-        minutes = (
-            self.env["ir.config_parameter"]
-            .sudo()
-            .get_int("o3p_mcp.access_token_minutes", DEFAULT_ACCESS_TOKEN_MINUTES)
+        minutes = get_config_int(
+            self.env, "o3p_mcp.access_token_minutes", DEFAULT_ACCESS_TOKEN_MINUTES
         )
         return timedelta(minutes=max(minutes, 1))
 
     @api.model
     def _refresh_token_lifetime(self):
-        days = (
-            self.env["ir.config_parameter"]
-            .sudo()
-            .get_int("o3p_mcp.refresh_token_days", DEFAULT_REFRESH_TOKEN_DAYS)
+        days = get_config_int(
+            self.env, "o3p_mcp.refresh_token_days", DEFAULT_REFRESH_TOKEN_DAYS
         )
         return timedelta(days=max(days, 1))

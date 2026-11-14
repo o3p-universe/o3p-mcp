@@ -11,9 +11,9 @@ from odoo.tests import tagged
 from odoo.tools import mute_logger
 
 from ..models.api import DEFAULT_DENIED_FIELDS
-from ..models.oauth import hash_secret
+from ..models.oauth import hash_secret, set_config
 from .api_common import API_URL, O3pMcpApiCase, basic
-from .common import REDIRECT_URI, RESOURCE
+from .common import REDIRECT_URI, RESOURCE, url_request
 
 
 @tagged("post_install", "-at_install")
@@ -98,11 +98,11 @@ class TestApiAuthentication(O3pMcpApiCase):
 
     def test_audience_must_be_the_configured_mcp_url(self):
         params = self.env["ir.config_parameter"].sudo()
-        params.set_str("o3p_mcp.resource_url", f"{RESOURCE}/")
+        set_config(params.env, "o3p_mcp.resource_url", f"{RESOURCE}/")
         self.assertEqual(self.call("models").status_code, 200)
-        params.set_str("o3p_mcp.resource_url", "https://other.example.com/mcp")
+        set_config(params.env, "o3p_mcp.resource_url", "https://other.example.com/mcp")
         self.assertApiError(self.call("models"), "invalid_token")
-        params.set_str("o3p_mcp.resource_url", "")
+        set_config(params.env, "o3p_mcp.resource_url", "")
         self.assertApiError(self.call("models"), "invalid_token")
 
     def test_scope_is_required(self):
@@ -122,9 +122,10 @@ class TestApiAuthentication(O3pMcpApiCase):
                 self.assertApiError(self.call(op, {"query": "select 1"}), "unknown_op")
         response = self.url_open(API_URL + "models")
         self.assertEqual(response.status_code, 405)
-        response = self.url_open(
+        response = url_request(
+            self,
+            "OPTIONS",
             API_URL + "models",
-            method="OPTIONS",
             headers={
                 "Origin": "https://inspector.example.com",
                 "Access-Control-Request-Method": "POST",
@@ -216,14 +217,14 @@ class TestApiDescribe(O3pMcpApiCase):
 
     def test_denylist_setting(self):
         params = self.env["ir.config_parameter"].sudo()
-        params.set_str("o3p_mcp.api_denied_models", "res.partner*")
-        params.set_str("o3p_mcp.api_denied_fields", "color\n*phone*")
+        set_config(params.env, "o3p_mcp.api_denied_models", "res.partner*")
+        set_config(params.env, "o3p_mcp.api_denied_fields", "color\n*phone*")
         self.assertApiError(self.call("describe", {"model": "res.partner"}), "unknown_model")
         names = {item["name"] for item in self.describe("res.users", user="admin")["fields"]}
         self.assertNotIn("phone", names)
         # Replacing the default list exposes what it used to hide.
         self.assertIn("password", names)
-        params.set_str("o3p_mcp.api_denied_models", "")
+        set_config(params.env, "o3p_mcp.api_denied_models", "")
         self.assertApiError(
             self.call("describe", {"model": "ir.config_parameter"}, user="admin"), "unknown_model"
         )
@@ -232,7 +233,7 @@ class TestApiDescribe(O3pMcpApiCase):
 @tagged("post_install", "-at_install")
 class TestApiLimitsAndAudit(O3pMcpApiCase):
     def test_result_too_large(self):
-        self.env["ir.config_parameter"].sudo().set_int("o3p_mcp.api_max_response_bytes", 200)
+        set_config(self.env, "o3p_mcp.api_max_response_bytes", 200)
         self.assertApiError(self.call("models", user="admin"), "result_too_large")
 
     def test_database_errors_are_mapped_without_detail(self):
@@ -405,7 +406,7 @@ class TestApiSearchRead(O3pMcpApiCase):
             self.assertEqual(admin["count"], 4)
 
     def test_denylist_applies_inside_domains_and_order_for_admins(self):
-        self.env["ir.config_parameter"].sudo().set_str(
+        set_config(self.env, 
             "o3p_mcp.api_denied_fields", "\n".join([*DEFAULT_DENIED_FIELDS, "color"])
         )
         for params in (
@@ -494,7 +495,7 @@ class TestApiSearchRead(O3pMcpApiCase):
         )["records"]
         self.assertEqual(rows[0]["category_id"], [self.visible.id])
         self.assertIsInstance(rows[0]["create_date"], str)
-        self.env["ir.config_parameter"].sudo().set_int("o3p_mcp.api_max_response_bytes", 150)
+        set_config(self.env, "o3p_mcp.api_max_response_bytes", 150)
         self.assertApiError(self.call("search", {"model": "res.partner", "domain": MCPT, "fields": ["name"]}, user="admin"), "result_too_large")
 
 
@@ -578,7 +579,7 @@ class TestApiGroup(O3pMcpApiCase):
                 sum(g["__count"] for g in self.group(user="admin", groupby=["function"], aggregates=["__count"])["groups"]),
                 4,
             )
-        self.env["ir.config_parameter"].sudo().set_str(
+        set_config(self.env, 
             "o3p_mcp.api_denied_fields", "\n".join([*DEFAULT_DENIED_FIELDS, "color"])
         )
         for params in (

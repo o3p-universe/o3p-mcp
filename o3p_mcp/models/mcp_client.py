@@ -4,6 +4,7 @@ from datetime import timedelta, timezone
 
 from odoo import api, fields, models
 from odoo.exceptions import ValidationError
+from odoo.tools.sql import create_index
 
 from .oauth import (
     CLIENT_AUTH_METHODS,
@@ -101,13 +102,23 @@ class O3pMcpClient(models.Model):
     last_used_at = fields.Datetime(readonly=True)
     token_ids = fields.One2many("o3p.mcp.token", "client_id", string="Tokens")
 
-    _client_id_unique = models.Constraint(
-        "UNIQUE (client_id)",
-        "Each client ID can only be registered once.",
-    )
-    _registration_index = models.Index(
-        "(registration_bucket, create_date) WHERE registration_bucket IS NOT NULL"
-    )
+    _sql_constraints = [
+        (
+            "client_id_unique",
+            "UNIQUE (client_id)",
+            "Each client ID can only be registered once.",
+        ),
+    ]
+
+    def init(self):
+        # Odoo 18 has no models.Index; the index is created once, by name.
+        create_index(
+            self.env.cr,
+            "o3p_mcp_client_registration_index",
+            self._table,
+            ["registration_bucket", "create_date"],
+            where="registration_bucket IS NOT NULL",
+        )
 
     @api.depends("registration_ip")
     def _compute_registration_bucket(self):

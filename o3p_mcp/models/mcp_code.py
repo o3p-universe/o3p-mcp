@@ -46,10 +46,9 @@ class O3pMcpCode(models.Model):
         help="Token family issued in exchange for this code.",
     )
 
-    _code_hash_unique = models.Constraint(
-        "UNIQUE (code_hash)",
-        "Authorization codes must be unique.",
-    )
+    _sql_constraints = [
+        ("code_hash_unique", "UNIQUE (code_hash)", "Authorization codes must be unique."),
+    ]
 
     @api.model
     def _create_code(self, client, user, redirect_uri, code_challenge, scopes, resource):

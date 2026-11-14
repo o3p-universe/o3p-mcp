@@ -7,6 +7,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from odoo import Command
 from odoo.tests import HttpCase, new_test_user
+from ..models.oauth import set_config
 
 
 RESOURCE = "https://mcp.example.com/mcp"
@@ -19,6 +20,17 @@ def pkce_pair():
     verifier = secrets.token_urlsafe(48)
     digest = hashlib.sha256(verifier.encode()).digest()
     return verifier, base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+
+
+def url_request(case, method, url, **kwargs):
+    """Send any request through the test session.
+
+    Odoo 18's ``HttpCase.url_open`` takes neither ``method`` nor ``json``.
+    """
+    if url.startswith("/"):
+        url = case.base_url() + url
+    kwargs.setdefault("timeout", 12)
+    return case.opener.request(method, url, **kwargs)
 
 
 def location_of(response):
@@ -85,7 +97,7 @@ class O3pMcpCommon:
     def demote_to_reader(cls, user):
         user.write(
             {
-                "group_ids": [
+                "groups_id": [
                     Command.unlink(cls.editor_group.id),
                     Command.link(cls.user_group.id),
                 ]
@@ -96,7 +108,7 @@ class O3pMcpCommon:
     def remove_mcp_access(cls, user):
         user.write(
             {
-                "group_ids": [
+                "groups_id": [
                     Command.unlink(cls.editor_group.id),
                     Command.unlink(cls.user_group.id),
                 ]
@@ -110,7 +122,7 @@ class O3pMcpHttpCase(O3pMcpCommon, HttpCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.env["ir.config_parameter"].sudo().set_str("o3p_mcp.resource_url", RESOURCE)
+        set_config(cls.env, "o3p_mcp.resource_url", RESOURCE)
         cls.issuer = cls.env["o3p.mcp.oauth"]._issuer()
 
     def setUp(self):

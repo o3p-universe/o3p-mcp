@@ -3,7 +3,15 @@ from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from odoo.tests import new_test_user, tagged
 
-from .common import AUTHORIZE_URL, REDIRECT_URI, RESOURCE, O3pMcpHttpCase, location_of
+from ..models.oauth import set_config
+from .common import (
+    AUTHORIZE_URL,
+    REDIRECT_URI,
+    RESOURCE,
+    O3pMcpHttpCase,
+    location_of,
+    url_request,
+)
 
 
 @tagged("post_install", "-at_install")
@@ -83,7 +91,7 @@ class TestAuthorize(O3pMcpHttpCase):
         self.assertEqual(self.get_consent(resource=None).status_code, 200)
 
     def test_unconfigured_resource_shows_an_error(self):
-        self.env["ir.config_parameter"].sudo().set_str("o3p_mcp.resource_url", "")
+        set_config(self.env, "o3p_mcp.resource_url", "")
         self.authenticate("o3p_mcp_editor", "o3p_mcp_editor")
         self.assertErrorPage(self.get_consent())
 
@@ -135,7 +143,9 @@ class TestAuthorize(O3pMcpHttpCase):
     def test_user_without_mcp_group_is_never_redirected(self):
         # Review probe: a self-registered client sending a plain user straight
         # back to an arbitrary site with a bare client_id.
-        registered = self.url_open(
+        registered = url_request(
+            self,
+            "POST",
             "/o3p_mcp/oauth/register",
             json={
                 "redirect_uris": ["https://evil.example/landing"],
@@ -273,8 +283,8 @@ class TestAuthorize(O3pMcpHttpCase):
     def test_options_request_cannot_approve(self):
         self.authenticate("o3p_mcp_editor", "o3p_mcp_editor")
         params = dict(self.authorization_params(), decision="approve")
-        response = self.url_open(
-            AUTHORIZE_URL, data=params, method="OPTIONS", allow_redirects=False
+        response = url_request(
+            self, "OPTIONS", AUTHORIZE_URL, data=params, allow_redirects=False
         )
         self.assertNotIn("code=", response.headers.get("Location", ""))
         self.assertFalse(self.Code.search([]))
