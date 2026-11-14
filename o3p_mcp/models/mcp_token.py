@@ -18,6 +18,9 @@ from .oauth import (
 PURGE_BATCH_SIZE = 1000
 # last_used_at is written at most this often per token.
 LAST_USED_RESOLUTION = timedelta(minutes=1)
+# A client that lost the answer to a refresh may retry with the same refresh
+# token this long, as long as the new token has not been used.
+REFRESH_RETRY_GRACE = timedelta(seconds=10)
 INACTIVE = {"active": False}
 
 
@@ -59,6 +62,13 @@ class O3pMcpToken(models.Model):
     rotated_at = fields.Datetime(
         readonly=True,
         help="When the refresh token was exchanged for the next token.",
+    )
+    successor_id = fields.Many2one(
+        "o3p.mcp.token",
+        string="Next token",
+        readonly=True,
+        ondelete="set null",
+        help="Token issued when this token's refresh token was used.",
     )
     revoked_at = fields.Datetime(readonly=True)
     last_used_at = fields.Datetime(readonly=True)
@@ -144,15 +154,16 @@ class O3pMcpToken(models.Model):
         """Exchange a refresh token for a new token of the same family.
 
         A refresh token works once. Presenting one that was already rotated
-        revokes the whole family. ``scopes`` may narrow the grant; the user's
+        revokes the whole family, except for a retry by the same client
+        within ``REFRESH_RETRY_GRACE`` while the next token is still unused,
+        which is only refused. ``scopes`` may narrow the grant; the user's
         current groups narrow it further.
         """
         token = find_by_secret(self, "refresh_hash", refresh_token)
         if not token or token.client_id != client:
             raise OAuthError("invalid_grant", "The refresh token is not valid.")
         if token.revoked_at or token.rotated_at:
-            token._revoke_family()
-            raise OAuthError("invalid_grant", "The refresh token is not valid.")
+            token._refuse_reuse()
         if token.refresh_expires_at <= fields.Datetime.now():
             raise OAuthError("invalid_grant", "The refresh token has expired.")
         granted = parse_scope(token.scope)
@@ -167,8 +178,7 @@ class O3pMcpToken(models.Model):
         if resource and not same_resource(resource, token.resource):
             raise OAuthError("invalid_target", "The resource does not match.")
         if not token._claim_refresh():
-            token._revoke_family()
-            raise OAuthError("invalid_grant", "The refresh token is not valid.")
+            token._refuse_reuse()
         allowed = requested & self.env["o3p.mcp.oauth"]._scopes_for_user(
             token.user_id
         )
@@ -177,9 +187,32 @@ class O3pMcpToken(models.Model):
             raise OAuthError(
                 "invalid_grant", "The user may no longer use the MCP server."
             )
-        return self._issue(
+        successor, response = self._issue(
             client, token.user_id, allowed, token.resource, family=token.family
         )
+        token.successor_id = successor
+        return successor, response
+
+    def _refuse_reuse(self):
+        """Refuse a refresh token that was already used or revoked.
+
+        A retry within the grace period, before the next token was used, is
+        refused without consequence; any other reuse is treated as a stolen
+        token and revokes the whole family.
+        """
+        self.ensure_one()
+        self.invalidate_recordset(["rotated_at", "revoked_at", "successor_id"])
+        successor = self.successor_id
+        retry = (
+            self.rotated_at
+            and not self.revoked_at
+            and fields.Datetime.now() - self.rotated_at <= REFRESH_RETRY_GRACE
+            and successor
+            and not (successor.revoked_at or successor.rotated_at or successor.last_used_at)
+        )
+        if not retry:
+            self._revoke_family()
+        raise OAuthError("invalid_grant", "The refresh token was already used.")
 
     def _claim_refresh(self):
         """Mark the refresh token used; return False when it already was."""

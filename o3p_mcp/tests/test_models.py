@@ -140,6 +140,9 @@ class TestTokens(O3pMcpCommon, TransactionCase):
         other, other_response = self.issue(self.reader, scopes=("okf.read",))
         token, first = self.issue()
         new, second = self.Token._rotate(first["refresh_token"], self.client)
+        self.assertEqual(token.successor_id, new)
+        # The new token is in use, so the old refresh token is a replay.
+        self.assertTrue(self.Token._introspect(second["access_token"])["active"])
         self.assertOAuthError(
             "invalid_grant", self.Token._rotate, first["refresh_token"], self.client
         )
@@ -152,6 +155,47 @@ class TestTokens(O3pMcpCommon, TransactionCase):
         # Other families are untouched.
         self.assertFalse(other.revoked_at)
         self.assertTrue(self.Token._introspect(other_response["access_token"])["active"])
+
+    def test_retry_within_grace_keeps_the_family(self):
+        token, first = self.issue()
+        new, second = self.Token._rotate(first["refresh_token"], self.client)
+        self.assertOAuthError(
+            "invalid_grant", self.Token._rotate, first["refresh_token"], self.client
+        )
+        self.assertFalse(token.revoked_at)
+        self.assertFalse(new.revoked_at)
+        self.assertTrue(self.Token._introspect(second["access_token"])["active"])
+        self.Token._rotate(second["refresh_token"], self.client)
+
+    def test_retry_after_grace_revokes_the_family(self):
+        token, first = self.issue()
+        new, _second = self.Token._rotate(first["refresh_token"], self.client)
+        token.rotated_at = fields.Datetime.now() - timedelta(seconds=11)
+        self.assertOAuthError(
+            "invalid_grant", self.Token._rotate, first["refresh_token"], self.client
+        )
+        self.assertTrue(new.revoked_at)
+
+    def test_retry_after_the_next_token_was_refreshed_revokes_the_family(self):
+        token, first = self.issue()
+        new, second = self.Token._rotate(first["refresh_token"], self.client)
+        newest, _third = self.Token._rotate(second["refresh_token"], self.client)
+        self.assertOAuthError(
+            "invalid_grant", self.Token._rotate, first["refresh_token"], self.client
+        )
+        self.assertTrue(newest.revoked_at)
+
+    def test_retry_by_another_client_is_refused_without_effect(self):
+        other_client = self.env["o3p.mcp.client"].create(
+            {"name": "Other", "redirect_uris": ["https://other.example.com/cb"]}
+        )
+        token, first = self.issue()
+        new, _second = self.Token._rotate(first["refresh_token"], self.client)
+        token.rotated_at = fields.Datetime.now() - timedelta(seconds=11)
+        self.assertOAuthError(
+            "invalid_grant", self.Token._rotate, first["refresh_token"], other_client
+        )
+        self.assertFalse(new.revoked_at)
 
     def test_revoke_family(self):
         token, first = self.issue()

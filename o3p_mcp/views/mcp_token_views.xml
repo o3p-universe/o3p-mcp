@@ -48,6 +48,7 @@
                             <field name="expires_at"/>
                             <field name="refresh_expires_at"/>
                             <field name="rotated_at"/>
+                            <field name="successor_id" invisible="not successor_id"/>
                             <field name="revoked_at"/>
                             <field name="last_used_at"/>
                         </group>

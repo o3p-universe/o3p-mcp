@@ -175,6 +175,10 @@ class TestTokenEndpoint(O3pMcpTokenCase):
     def test_refresh_rotation_and_replay(self):
         first = self.tokens_for()
         second = self.refresh(first["refresh_token"]).json()
+        # A retry right away, before the new token is used, is only refused.
+        self.assertTokenError(self.refresh(first["refresh_token"]), "invalid_grant")
+        self.assertTrue(self.Token._introspect(second["access_token"])["active"])
+        # Once the new token is in use, the old refresh token is a replay.
         self.assertTokenError(self.refresh(first["refresh_token"]), "invalid_grant")
         self.assertEqual(self.Token._introspect(second["access_token"]), INACTIVE)
         self.assertTokenError(self.refresh(second["refresh_token"]), "invalid_grant")

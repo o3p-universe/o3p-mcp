@@ -27,7 +27,11 @@ hold none.
 - **Access tokens** live 60 minutes; **refresh tokens** 30 days from their
   issue. Every refresh rotates the refresh token: the new pair belongs to the
   same family, the previous access token stays valid until it expires, and
-  presenting an already used refresh token revokes the whole family.
+  presenting an already used refresh token revokes the whole family. One
+  exception covers a client that lost the refresh response: if the same
+  client presents the just-used refresh token within 10 seconds and the new
+  token has not been used yet, the request is refused with `invalid_grant`
+  and nothing is revoked. Authorization codes have no such grace.
 - Codes, tokens and client secrets are 256-bit random values. Odoo stores only
   their SHA-256 digests, so a token cannot be read back from the database.
 - A token answers as active only while it is unexpired and unrevoked, its
