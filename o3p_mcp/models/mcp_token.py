@@ -3,6 +3,7 @@ from datetime import timedelta, timezone
 
 from odoo import api, fields, models
 
+from .api import DEFAULT_LOG_DAYS
 from .oauth import (
     SCOPE_READ,
     OAuthError,
@@ -312,9 +313,10 @@ class O3pMcpToken(models.Model):
     def _purge_expired(self, limit=PURGE_BATCH_SIZE):
         """Delete up to ``limit`` expired rows; return the count.
 
-        Expired codes, tokens whose refresh token has expired and
+        Expired codes, tokens whose refresh token has expired,
         self-registered clients that never completed a token exchange within
-        ``UNUSED_CLIENT_AGE`` are deleted. A token stays until its refresh
+        ``UNUSED_CLIENT_AGE`` and data API log rows older than the configured
+        number of days are deleted. A token stays until its refresh
         token has expired, so a replayed refresh token is recognised for as
         long as it could have been used.
         """
@@ -345,10 +347,18 @@ class O3pMcpToken(models.Model):
                 ],
                 limit=limit - len(codes) - len(tokens),
             )
-        count = len(codes) + len(tokens) + len(clients)
+        logs = self.env["o3p.mcp.api.log"].sudo().browse()
+        if len(codes) + len(tokens) + len(clients) < limit:
+            days = self.env["o3p.mcp.api"]._setting("o3p_mcp.api_log_days", DEFAULT_LOG_DAYS)
+            logs = logs.search(
+                [("create_date", "<", now - timedelta(days=days))],
+                limit=limit - len(codes) - len(tokens) - len(clients),
+            )
+        count = len(codes) + len(tokens) + len(clients) + len(logs)
         codes.unlink()
         tokens.unlink()
         clients.unlink()
+        logs.unlink()
         return count
 
     @api.model

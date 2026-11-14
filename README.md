@@ -59,6 +59,7 @@ All URLs are relative to the issuer (see Settings).
 | `POST /o3p_mcp/oauth/token` | Token endpoint (authorization code and refresh token grants) |
 | `POST /o3p_mcp/oauth/introspect` | Token introspection for the MCP server (RFC 7662) |
 | `POST /o3p_mcp/oauth/revoke` | Token revocation (RFC 7009) |
+| `POST /o3p_mcp/api/v1/<op>` | Data API for the MCP server, read-only, as the signed-in user |
 
 The metadata, registration, token and revocation endpoints answer
 cross-origin requests (`Access-Control-Allow-Origin: *`); introspection does
@@ -178,6 +179,74 @@ either token revokes every token of the same authorization. Unknown tokens
 and tokens of other clients are ignored; the answer is always an empty
 HTTP 200 once the client is authenticated.
 
+## Data API
+
+The MCP server reads Odoo data on behalf of a signed-in user through
+`POST /o3p_mcp/api/v1/<op>`. It authenticates with HTTP Basic as the
+resource-server client (the introspection credentials) and passes the user's
+access token in the JSON body:
+
+```json
+{ "token": "<the user's access token>", "params": { "model": "res.partner" } }
+```
+
+Odoo checks the token as introspection does (unrevoked, unexpired, issued to
+an active client for the configured MCP server URL, user active and internal,
+not a portal user, `okf.read` still allowed by the groups) and requires the
+operation's scope (`odoo.read`). The operation then runs as that user, in the
+user's language and time zone: Odoo's access rights, record rules and field
+groups decide what the answer contains. It runs in a read-only database
+transaction with a time limit, so it cannot change anything. The endpoint
+answers no cross-origin requests and never creates a session.
+
+A success is `200 { "result": … }`. An error is
+`{ "error": { "code": "…", "message": "…" } }` with a fixed message that
+never contains an exception text, a parameter or record data:
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `invalid_params` | The body or a parameter is not valid |
+| 401 | `invalid_client` | The resource-server credentials are missing or wrong |
+| 403 | `invalid_token` | The user's token fails any check above |
+| 403 | `insufficient_scope` | The token lacks the operation's scope |
+| 403 | `access_denied` | The user may not read the model or the records |
+| 404 | `unknown_op` | The operation does not exist (`sql` is reserved and not offered yet) |
+| 404 | `unknown_model` | The model does not exist, is transient or abstract, or is hidden |
+| 413 | `result_too_large` | The answer exceeds the configured size |
+| 422 | `query_error` | The database or the ORM refused the query |
+| 504 | `timeout` | The query exceeded the time limit |
+
+### Operations
+
+| Operation | Parameters | Result |
+|---|---|---|
+| `models` | `query` (optional, matched on the technical and the display name), `limit` (1–50, default 50) | `[{ "model", "name" }]`: the models the user may read |
+| `describe` | `model` | `{ "model", "name", "fields": [{ "name", "string", "type", "relation"?, "required", "readonly", "selection"?, "help"? }] }`: the fields the user may read |
+
+`models` never lists transient, abstract or hidden models.
+
+### Hidden models and fields
+
+Some data is never exposed, whatever the user's rights, administrators
+included. The lists are settings (one pattern per line, `*` matches
+anything); an empty list restores the default.
+
+- Models, by default: `ir.config_parameter`, `res.users.apikeys*`,
+  `o3p.mcp.*`, `auth_totp*`, `ir.mail_server`, `fetchmail.server`,
+  `payment.provider`.
+- Field names, on every model, by default: `*password*`, `*secret*`,
+  `*token*`, `*api_key*`.
+- Always: binary fields (files and images), and relational fields that
+  point to a hidden model.
+
+### Call log
+
+Every call that reaches the operation or fails authentication is recorded
+in **Settings › Technical › MCP › API Calls**: time, user, MCP client,
+operation, model, HTTP status, error code, row count and duration. Parameters
+and results are never stored. Rows older than the configured number of days
+(default 30) are deleted by the daily scheduled action.
+
 ## Settings
 
 **Settings › MCP** (administrators only), stored as `ir.config_parameter`
@@ -189,6 +258,11 @@ values under `o3p_mcp.*`:
 | MCP server URL: the public MCP endpoint, the only resource and token audience | `o3p_mcp.resource_url` | empty |
 | Access token lifetime, 1 to 1440 minutes | `o3p_mcp.access_token_minutes` | 60 |
 | Refresh token lifetime, 1 to 365 days, counted from each refresh | `o3p_mcp.refresh_token_days` | 30 |
+| Data API hidden models, one pattern per line | `o3p_mcp.api_denied_models` | see Data API |
+| Data API hidden field names, one pattern per line | `o3p_mcp.api_denied_fields` | see Data API |
+| Data API largest answer (KB; stored in bytes) | `o3p_mcp.api_max_response_bytes` | 1000 KB |
+| Data API time limit per query (seconds) | `o3p_mcp.api_timeout_seconds` | 15 |
+| Data API call log retention (days) | `o3p_mcp.api_log_days` | 30 |
 
 The issuer is used for the metadata, the endpoint URLs and the `iss`
 parameter. It does not follow `web.base.url`, which Odoo rewrites whenever
@@ -211,6 +285,7 @@ metadata URL and the introspection URL, and offers two buttons:
   their redirect URIs (one per line, same rules as registration),
   authentication method, registration address and last use. Archiving a
   client deactivates its tokens; **Revoke all tokens** revokes them.
+- **API Calls**: the data API call log (read-only).
 - **Tokens**: issued tokens with user, client, scope, state (active,
   rotated, expired, revoked) and times. **Revoke**, on a token or on a
   selection, revokes every token of the same authorization.

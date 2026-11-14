@@ -5,6 +5,14 @@ import requests
 from odoo import api, fields, models
 from odoo.exceptions import UserError
 
+from .api import (
+    DEFAULT_DENIED_FIELDS,
+    DEFAULT_DENIED_MODELS,
+    DEFAULT_LOG_DAYS,
+    DEFAULT_MAX_RESPONSE_BYTES,
+    DEFAULT_TIMEOUT_SECONDS,
+    patterns,
+)
 from .oauth import (
     DEFAULT_ACCESS_TOKEN_MINUTES,
     DEFAULT_REFRESH_TOKEN_DAYS,
@@ -76,6 +84,28 @@ class ResConfigSettings(models.TransientModel):
         help="Public URL of this Odoo as the authorization server, such as "
         "https://odoo.example.com. Metadata, endpoints and iss use it.",
     )
+    o3p_mcp_api_denied_models = fields.Text(
+        string="Hidden models",
+        help="Models the data API never exposes, one pattern per line (* matches "
+        "anything). Applies to every user, administrators included.",
+    )
+    o3p_mcp_api_denied_fields = fields.Text(
+        string="Hidden fields",
+        help="Field names the data API never exposes on any model, one pattern "
+        "per line. Binary fields are always hidden.",
+    )
+    o3p_mcp_api_max_response_kb = fields.Integer(
+        string="Largest answer (KB)",
+        default=DEFAULT_MAX_RESPONSE_BYTES // 1000,
+    )
+    o3p_mcp_api_timeout_seconds = fields.Integer(
+        string="Query time limit (seconds)",
+        default=DEFAULT_TIMEOUT_SECONDS,
+    )
+    o3p_mcp_api_log_days = fields.Integer(
+        string="Keep call log (days)",
+        default=DEFAULT_LOG_DAYS,
+    )
     o3p_mcp_metadata_url = fields.Char(
         string="Metadata URL",
         compute="_compute_o3p_mcp_urls",
@@ -111,6 +141,20 @@ class ResConfigSettings(models.TransientModel):
             o3p_mcp_refresh_token_days=params.get_int(
                 "o3p_mcp.refresh_token_days", DEFAULT_REFRESH_TOKEN_DAYS
             ),
+            o3p_mcp_api_denied_models="\n".join(
+                patterns(params.get_str("o3p_mcp.api_denied_models"), DEFAULT_DENIED_MODELS)
+            ),
+            o3p_mcp_api_denied_fields="\n".join(
+                patterns(params.get_str("o3p_mcp.api_denied_fields"), DEFAULT_DENIED_FIELDS)
+            ),
+            o3p_mcp_api_max_response_kb=params.get_int(
+                "o3p_mcp.api_max_response_bytes", DEFAULT_MAX_RESPONSE_BYTES
+            )
+            // 1000,
+            o3p_mcp_api_timeout_seconds=params.get_int(
+                "o3p_mcp.api_timeout_seconds", DEFAULT_TIMEOUT_SECONDS
+            ),
+            o3p_mcp_api_log_days=params.get_int("o3p_mcp.api_log_days", DEFAULT_LOG_DAYS),
         )
         return values
 
@@ -147,8 +191,27 @@ class ResConfigSettings(models.TransientModel):
                     max=MAX_REFRESH_TOKEN_DAYS,
                 )
             )
+        if not 1 <= self.o3p_mcp_api_max_response_kb <= 100_000:
+            raise UserError(self.env._("The largest answer must be between 1 and 100000 KB."))
+        if not 1 <= self.o3p_mcp_api_timeout_seconds <= 300:
+            raise UserError(
+                self.env._("The query time limit must be between 1 and 300 seconds.")
+            )
+        if not 1 <= self.o3p_mcp_api_log_days <= 3650:
+            raise UserError(self.env._("The call log must be kept between 1 and 3650 days."))
         result = super().set_values()
         params = self.env["ir.config_parameter"].sudo()
+        params.set_str(
+            "o3p_mcp.api_denied_models",
+            "\n".join(patterns(self.o3p_mcp_api_denied_models, DEFAULT_DENIED_MODELS)),
+        )
+        params.set_str(
+            "o3p_mcp.api_denied_fields",
+            "\n".join(patterns(self.o3p_mcp_api_denied_fields, DEFAULT_DENIED_FIELDS)),
+        )
+        params.set_int("o3p_mcp.api_max_response_bytes", self.o3p_mcp_api_max_response_kb * 1000)
+        params.set_int("o3p_mcp.api_timeout_seconds", self.o3p_mcp_api_timeout_seconds)
+        params.set_int("o3p_mcp.api_log_days", self.o3p_mcp_api_log_days)
         params.set_str("o3p_mcp.issuer", issuer)
         params.set_str("o3p_mcp.resource_url", resource_url)
         params.set_int("o3p_mcp.access_token_minutes", self.o3p_mcp_access_token_minutes)

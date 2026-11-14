@@ -5,3 +5,4 @@ from . import test_authorize
 from . import test_token
 from . import test_introspect
 from . import test_settings
+from . import test_api

@@ -57,6 +57,41 @@
                             </div>
                         </setting>
                     </block>
+                    <block title="Data API">
+                        <setting id="o3p_mcp_api_denied_models"
+                                 string="Hidden models"
+                                 help="Models the data API never exposes, one pattern per line (* matches anything). Applies to administrators too; an empty list restores the default.">
+                            <field name="o3p_mcp_api_denied_models"/>
+                        </setting>
+                        <setting id="o3p_mcp_api_denied_fields"
+                                 string="Hidden fields"
+                                 help="Field names the data API never exposes, on any model, one pattern per line. Binary fields are always hidden; an empty list restores the default.">
+                            <field name="o3p_mcp_api_denied_fields"/>
+                        </setting>
+                        <setting id="o3p_mcp_api_limits"
+                                 string="Limits"
+                                 help="Largest answer, time limit per query and how long the call log is kept.">
+                            <div class="content-group">
+                                <div class="row">
+                                    <label for="o3p_mcp_api_max_response_kb" class="col-lg-6 o_light_label"/>
+                                    <field name="o3p_mcp_api_max_response_kb"/>
+                                </div>
+                                <div class="row">
+                                    <label for="o3p_mcp_api_timeout_seconds" class="col-lg-6 o_light_label"/>
+                                    <field name="o3p_mcp_api_timeout_seconds"/>
+                                </div>
+                                <div class="row">
+                                    <label for="o3p_mcp_api_log_days" class="col-lg-6 o_light_label"/>
+                                    <field name="o3p_mcp_api_log_days"/>
+                                </div>
+                                <button name="o3p_mcp.action_mcp_api_log"
+                                        type="action"
+                                        string="API calls"
+                                        icon="oi-arrow-right"
+                                        class="btn-link"/>
+                            </div>
+                        </setting>
+                    </block>
                     <block title="Tokens">
                         <setting id="o3p_mcp_access_token_minutes"
                                  string="Access tokens"
