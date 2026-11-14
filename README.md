@@ -124,7 +124,8 @@ refused. Responses carry `Cache-Control: no-store`.
   A code is consumed by its first exchange, successful or not; presenting it
   again revokes the tokens it was exchanged for.
 - `grant_type=refresh_token` with `refresh_token` and optionally `scope`
-  (a subset of the original grant) and `resource`. The user must still be
+  (a subset of the original grant that includes `okf.read`; anything else
+  gets `invalid_scope` and leaves the refresh token usable) and `resource`. The user must still be
   active and in the MCP groups: losing the Editor group narrows the new
   token to `okf.read`, losing the User group refuses the refresh and revokes
   the family.

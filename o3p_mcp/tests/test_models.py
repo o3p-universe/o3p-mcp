@@ -126,6 +126,16 @@ class TestTokens(O3pMcpCommon, TransactionCase):
             scopes={"okf.read", "okf.write"},
         )
 
+    def test_rotate_requires_read_scope_before_claiming(self):
+        token, first = self.issue()
+        self.assertOAuthError(
+            "invalid_scope", self.Token._rotate, first["refresh_token"], self.client,
+            scopes={"okf.write"},
+        )
+        self.assertFalse(token.rotated_at)
+        self.assertFalse(token.revoked_at)
+        self.Token._rotate(first["refresh_token"], self.client)
+
     def test_replayed_refresh_token_revokes_the_family(self):
         other, other_response = self.issue(self.reader, scopes=("okf.read",))
         token, first = self.issue()

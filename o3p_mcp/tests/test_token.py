@@ -188,6 +188,17 @@ class TestTokenEndpoint(O3pMcpTokenCase):
             "invalid_scope",
         )
 
+    def test_refresh_scope_without_read_keeps_the_grant(self):
+        # Review probe: scope=okf.write alone used to revoke the family.
+        tokens = self.tokens_for()
+        self.assertTokenError(
+            self.refresh(tokens["refresh_token"], scope="okf.write"), "invalid_scope"
+        )
+        self.assertTrue(self.Token._introspect(tokens["access_token"])["active"])
+        response = self.refresh(tokens["refresh_token"], scope="okf.read")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["scope"], "okf.read")
+
     def test_group_removed_between_refreshes(self):
         first = self.tokens_for()
         self.demote_to_reader(self.editor)

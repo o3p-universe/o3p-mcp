@@ -157,9 +157,12 @@ class O3pMcpToken(models.Model):
             raise OAuthError("invalid_grant", "The refresh token has expired.")
         granted = parse_scope(token.scope)
         requested = granted if scopes is None else set(scopes)
-        if not requested or not requested <= granted:
+        # Checked before the refresh token is claimed: a bad request must not
+        # cost the client its grant.
+        if not requested <= granted or SCOPE_READ not in requested:
             raise OAuthError(
-                "invalid_scope", "The scope exceeds the original grant."
+                "invalid_scope",
+                "The scope must include okf.read and stay within the original grant.",
             )
         if resource and not same_resource(resource, token.resource):
             raise OAuthError("invalid_target", "The resource does not match.")
