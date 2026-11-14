@@ -270,7 +270,17 @@ part, or a parameter the operation does not take, is refused with
   `ilike`-style operators match the related records' display name. Forms
   without a faithful rewrite (`child_of`, `parent_of`, comparisons, `=?`,
   lists holding `false`) are refused. Paths are expanded the same way,
-  `a.b` into `["a", "any", [["b", …]]]`, as Odoo itself does. Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `=?`, `in`, `not in`,
+  `a.b` into `["a", "any", [["b", …]]]`, as Odoo itself does.
+- On a many-to-one field, record ids and `false` compare the column itself
+  (`["partner_id", "=", 7]`, `["partner_id", "in", [7, false]]`). Text
+  matches the related records' display name with the related model's rules
+  applied: `["partner_id", "ilike", "acme"]` becomes
+  `["partner_id", "any", [["display_name", "ilike", "acme"]]]`, and `=`,
+  `in` and their negations work the same way. On a relation that bypasses
+  access (Odoo's `bypass_search_access`, such as a project's customer),
+  such text conditions are refused, since Odoo would match names, e-mails or
+  VAT numbers of records the user may not read; search the related model
+  first and filter on its ids. Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `=?`, `in`, `not in`,
   `like`, `not like`, `ilike`, `not ilike`, `=like`, `=ilike`, `child_of`,
   `parent_of`, `any`, `not any`. Values are JSON scalars or lists of
   scalars.
