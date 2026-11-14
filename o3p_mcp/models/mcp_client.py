@@ -1,3 +1,4 @@
+import ipaddress
 import secrets
 from datetime import timedelta, timezone
 
@@ -34,6 +35,23 @@ DEFAULT_CLIENT_NAME = "MCP client"
 # Compared against when the client ID is unknown, so that unknown and known
 # clients take the same time to reject.
 _UNKNOWN_CLIENT_DIGEST = hash_secret("o3p_mcp unknown client")
+
+
+def address_bucket(ip):
+    """Return the unit the registration limit counts for address ``ip``.
+
+    An IPv4 address counts alone; an IPv6 address counts with its /64
+    network, which one host or user usually controls entirely.
+    """
+    try:
+        address = ipaddress.ip_address(ip)
+    except ValueError:
+        return ip
+    if address.version == 6:
+        if address.ipv4_mapped:
+            return str(address.ipv4_mapped)
+        return str(ipaddress.IPv6Network((int(address) >> 64 << 64, 64)))
+    return str(address)
 
 
 def _new_client_id():
@@ -73,6 +91,12 @@ class O3pMcpClient(models.Model):
     )
     secret_hash = fields.Char(copy=False, readonly=True, groups="base.group_system")
     registration_ip = fields.Char(string="Registration IP", readonly=True)
+    registration_bucket = fields.Char(
+        compute="_compute_registration_bucket",
+        store=True,
+        help="Address unit the registration limit counts: the IPv4 address or "
+        "the IPv6 /64 network.",
+    )
     active = fields.Boolean(default=True)
     last_used_at = fields.Datetime(readonly=True)
     token_ids = fields.One2many("o3p.mcp.token", "client_id", string="Tokens")
@@ -82,8 +106,15 @@ class O3pMcpClient(models.Model):
         "Each client ID can only be registered once.",
     )
     _registration_index = models.Index(
-        "(registration_ip, create_date) WHERE registration_ip IS NOT NULL"
+        "(registration_bucket, create_date) WHERE registration_bucket IS NOT NULL"
     )
+
+    @api.depends("registration_ip")
+    def _compute_registration_bucket(self):
+        for client in self:
+            client.registration_bucket = (
+                address_bucket(client.registration_ip) if client.registration_ip else False
+            )
 
     @api.depends("redirect_uris")
     def _compute_redirect_uris_text(self):
@@ -174,13 +205,14 @@ class O3pMcpClient(models.Model):
     def _register_client(self, metadata, ip):
         """Register a client from RFC 7591 ``metadata``; return the response.
 
-        At most ``REGISTRATION_LIMIT`` clients are registered per address and
-        hour. The client secret, for confidential clients, appears only in the
+        At most ``REGISTRATION_LIMIT`` clients are registered per hour and
+        IPv4 address or IPv6 /64 network. The client secret, for confidential clients, appears only in the
         returned response.
         """
+        ip = ip or "unknown"
         since = fields.Datetime.now() - REGISTRATION_WINDOW
         recent = self.sudo().with_context(active_test=False).search_count(
-            [("registration_ip", "=", ip), ("create_date", ">=", since)]
+            [("registration_bucket", "=", address_bucket(ip)), ("create_date", ">=", since)]
         )
         if recent >= REGISTRATION_LIMIT:
             raise OAuthError(

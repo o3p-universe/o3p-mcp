@@ -16,6 +16,8 @@ from .oauth import (
 
 
 PURGE_BATCH_SIZE = 1000
+# Self-registered clients that never obtained a token are deleted after this.
+UNUSED_CLIENT_AGE = timedelta(hours=24)
 # last_used_at is written at most this often per token.
 LAST_USED_RESOLUTION = timedelta(minutes=1)
 # A client that lost the answer to a refresh may retry with the same refresh
@@ -308,10 +310,13 @@ class O3pMcpToken(models.Model):
 
     @api.model
     def _purge_expired(self, limit=PURGE_BATCH_SIZE):
-        """Delete up to ``limit`` expired codes and tokens; return the count.
+        """Delete up to ``limit`` expired rows; return the count.
 
-        A token stays until its refresh token has expired, so a replayed
-        refresh token is recognised for as long as it could have been used.
+        Expired codes, tokens whose refresh token has expired and
+        self-registered clients that never completed a token exchange within
+        ``UNUSED_CLIENT_AGE`` are deleted. A token stays until its refresh
+        token has expired, so a replayed refresh token is recognised for as
+        long as it could have been used.
         """
         now = fields.Datetime.now()
         codes = self.env["o3p.mcp.code"].sudo().search(
@@ -329,9 +334,21 @@ class O3pMcpToken(models.Model):
                 ],
                 limit=limit - len(codes),
             )
-        count = len(codes) + len(tokens)
+        clients = self.env["o3p.mcp.client"].sudo().browse()
+        if len(codes) + len(tokens) < limit:
+            clients = clients.with_context(active_test=False).search(
+                [
+                    ("kind", "=", "client"),
+                    ("registration_ip", "!=", False),
+                    ("last_used_at", "=", False),
+                    ("create_date", "<", now - UNUSED_CLIENT_AGE),
+                ],
+                limit=limit - len(codes) - len(tokens),
+            )
+        count = len(codes) + len(tokens) + len(clients)
         codes.unlink()
         tokens.unlink()
+        clients.unlink()
         return count
 
     @api.model

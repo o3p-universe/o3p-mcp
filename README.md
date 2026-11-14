@@ -38,8 +38,9 @@ hold none.
   client is active, its user is active and the user still holds `okf.read`.
   The scopes reported are the granted scopes still allowed by the user's
   current groups.
-- A daily scheduled action deletes expired codes and tokens whose refresh
-  token has expired.
+- A daily scheduled action deletes expired codes, tokens whose refresh
+  token has expired, and self-registered clients that have not completed a
+  token exchange within 24 hours.
 
 ## Endpoints
 
@@ -76,8 +77,9 @@ types are `authorization_code` and optionally `refresh_token`; the only
 response type is `code`. Confidential clients receive their `client_secret`
 once, in the registration response.
 
-Each address may register at most 20 clients per hour; further requests get
-HTTP 429 with `Retry-After`.
+Each IPv4 address, or IPv6 /64 network, may register at most 20 clients per
+hour; further requests get HTTP 429 with `Retry-After`. A self-registered
+client that has not completed a token exchange within 24 hours is deleted.
 
 ### Authorization
 
@@ -237,8 +239,10 @@ at once in Odoo (the MCP server may cache an answer for up to a minute).
 
 - The issuer starts as `web.base.url` when the addon is installed; set it
   to the public URL in the settings if that differs.
-- Behind a reverse proxy, run Odoo with `proxy_mode` so that the
-  registration limit counts the clients' addresses rather than the proxy's.
+- Behind a reverse proxy, run Odoo with `proxy_mode` and have the proxy set
+  `X-Forwarded-For`, `X-Forwarded-Host` and `X-Forwarded-Proto`. Without
+  them every request appears to come from the proxy, and the per-address
+  registration limit applies to all clients together.
 - The metadata, registration, token, introspection and revocation endpoints
   run without a session, so Odoo must pick the database from the request
   alone: serve a single database or set `dbfilter` so the host name selects

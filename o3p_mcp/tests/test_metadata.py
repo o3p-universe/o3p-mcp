@@ -4,7 +4,8 @@ import re
 
 from odoo.tests import HttpCase, TransactionCase, tagged
 
-from ..models.oauth import display_target, is_allowed_redirect_uri, redirect_uri_matches
+from ..models.mcp_client import address_bucket
+from ..models.oauth import OAuthError, display_target, is_allowed_redirect_uri, redirect_uri_matches
 
 
 METADATA_URL = "/.well-known/oauth-authorization-server"
@@ -84,6 +85,17 @@ class TestRedirectUriPolicy(TransactionCase):
         ):
             with self.subTest(registered=registered, presented=presented):
                 self.assertEqual(redirect_uri_matches(registered, presented), matches)
+
+    def test_address_bucket(self):
+        for ip, bucket in (
+            ("203.0.113.7", "203.0.113.7"),
+            ("2001:db8:1:2:3:4:5:6", "2001:db8:1:2::/64"),
+            ("2001:db8:1:2::1", "2001:db8:1:2::/64"),
+            ("::ffff:203.0.113.7", "203.0.113.7"),
+            ("unknown", "unknown"),
+        ):
+            with self.subTest(ip=ip):
+                self.assertEqual(address_bucket(ip), bucket)
 
     def test_display_target(self):
         for uri, shown in (
@@ -297,3 +309,18 @@ class TestMetadataAndRegistration(HttpCase):
         self.assertEqual(response.json()["error"], "temporarily_unavailable")
         # Other addresses are counted separately.
         self.assertIn("client_id", Client._register_client(payload, "203.0.113.7"))
+
+    def test_rate_limit_counts_ipv6_per_64(self):
+        Client = self.env["o3p.mcp.client"]
+        payload = {
+            "redirect_uris": ["http://127.0.0.1:9999/callback"],
+            "token_endpoint_auth_method": "none",
+        }
+        for index in range(20):
+            Client._register_client(payload, f"2001:db8:1:2::{index + 1:x}")
+        with self.assertRaises(OAuthError) as caught:
+            Client._register_client(payload, "2001:db8:1:2:ffff:ffff:ffff:ffff")
+        self.assertEqual(caught.exception.status, 429)
+        self.assertIn("client_id", Client._register_client(payload, "2001:db8:1:3::1"))
+        client = Client.search([("registration_ip", "=", "2001:db8:1:3::1")])
+        self.assertEqual(client.registration_bucket, "2001:db8:1:3::/64")

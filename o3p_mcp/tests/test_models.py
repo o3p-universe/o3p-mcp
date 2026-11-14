@@ -289,6 +289,42 @@ class TestTokens(O3pMcpCommon, TransactionCase):
         self.assertFalse(expired.exists())
         self.assertFalse(old_code.exists())
 
+    def test_purge_unused_self_registered_clients(self):
+        Client = self.env["o3p.mcp.client"]
+        payload = {"redirect_uris": ["https://app.example.com/cb"], "token_endpoint_auth_method": "none"}
+
+        def register(ip, hours_ago):
+            client = Client.search(
+                [("client_id", "=", Client._register_client(payload, ip)["client_id"])]
+            )
+            self.env.cr.execute(
+                "UPDATE o3p_mcp_client SET create_date = now() at time zone 'UTC'"
+                " - make_interval(hours => %s) WHERE id = %s",
+                [hours_ago, client.id],
+            )
+            client.invalidate_recordset(["create_date"])
+            return client
+
+        stale = register("203.0.113.1", 25)
+        archived = register("203.0.113.2", 25)
+        archived.active = False
+        used = register("203.0.113.3", 25)
+        self.Token._issue(used, self.editor, {"okf.read"}, RESOURCE)
+        recent = register("203.0.113.4", 23)
+        self.env.cr.execute(
+            "UPDATE o3p_mcp_client SET create_date = create_date - interval '25 hours'"
+            " WHERE id = %s",
+            [self.client.id],
+        )
+        self.client.invalidate_recordset(["create_date"])
+        self.assertEqual(self.Token._purge_expired(), 2)
+        self.assertFalse(stale.exists())
+        self.assertFalse(archived.exists())
+        self.assertTrue(used.exists())
+        self.assertTrue(recent.exists())
+        # Clients created by an administrator are never purged.
+        self.assertTrue(self.client.exists())
+
     def test_cron_purge_reports_progress(self):
         expired, _response = self.issue()
         past = fields.Datetime.now() - timedelta(minutes=1)
