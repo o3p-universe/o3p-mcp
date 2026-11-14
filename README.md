@@ -226,7 +226,7 @@ exception, PostgreSQL's answer to an SQL query, is described under SQL):
 | 404 | `unknown_op` | The operation does not exist |
 | 404 | `unknown_model` | The model does not exist, is transient or abstract, or is hidden |
 | 413 | `result_too_large` | The answer exceeds the configured size |
-| 422 | `query_error` | The database or the ORM refused the query |
+| 422 | `query_error` | The database or the ORM refused the query, or anything else failed unexpectedly (the call is still recorded) |
 | 429 | `too_many_requests` | SQL only: the user, or all users together, already run the most queries allowed at once |
 | 503 | `unavailable` | SQL only: no sandbox is configured, or it cannot be reached |
 | 504 | `timeout` | The query exceeded the time limit |

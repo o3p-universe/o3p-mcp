@@ -269,6 +269,29 @@ class TestApiLimitsAndAudit(O3pMcpApiCase):
         log = self.env["o3p.mcp.api.log"].search([], limit=1)
         self.assertEqual((log.status, log.error), (422, "query_error"))
 
+    def test_unexpected_errors_answer_query_error_and_are_recorded(self):
+        api_class = type(self.env["o3p.mcp.api"])
+        Log = self.env["o3p.mcp.api.log"]
+
+        def broken_token_check(api_model, value, scope):
+            api_model.env.cr.execute("SELECT o3p_mcp_no_such_column FROM res_partner")
+
+        for label, patcher in (
+            ("inside the operation", patch.object(api_class, "_op_models", side_effect=RuntimeError("boom-secret"))),
+            ("before the operation", patch.object(api_class, "_check_token", side_effect=RuntimeError("boom-secret"))),
+            ("database error before the operation", patch.object(api_class, "_check_token", broken_token_check)),
+        ):
+            with self.subTest(label), patcher, mute_logger("odoo.sql_db"):
+                before = Log.search_count([])
+                response = self.call("models")
+                self.assertApiError(response, "query_error")
+                self.assertEqual(response.json()["error"]["message"], "The query could not be run.")
+                self.assertNotIn("boom", response.text)
+                self.assertNotIn("no_such_column", response.text)
+                log = Log.search([], limit=1)
+                self.assertEqual(Log.search_count([]), before + 1)
+                self.assertEqual((log.op, log.status, log.error), ("models", 422, "query_error"))
+
     def test_audit_rows_without_parameters(self):
         self.call("models", {"query": "sentinel-partner"})
         self.call("describe", {"model": "ir.cron"})
