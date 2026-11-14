@@ -23,7 +23,7 @@ trap cleanup EXIT
 
 set +e
 "${compose[@]}" run --rm --no-deps odoo odoo \
-    --addons-path=/mnt/o3p-mcp \
+    --addons-path=/mnt/extra-addons \
     -d o3p_mcp_test -i o3p_mcp \
     --test-enable --test-tags "$tags" \
     --stop-after-init 2>&1 | tee "$log"

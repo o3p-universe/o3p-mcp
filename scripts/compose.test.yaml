@@ -26,7 +26,7 @@ services:
       PASSWORD: odoo
       PYTHONDONTWRITEBYTECODE: "1"
     volumes:
-      - ..:/mnt/o3p-mcp:ro
+      - ..:/mnt/extra-addons:ro
     # Read the bind mount without relabelling the host files (SELinux hosts).
     security_opt:
       - label:disable

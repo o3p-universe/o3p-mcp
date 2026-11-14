@@ -1,15 +1,35 @@
 import secrets
+from datetime import timedelta, timezone
 
 from odoo import api, fields, models
 
-from .oauth import OAuthError, hash_secret, new_secret, secret_matches
+from .oauth import (
+    CLIENT_AUTH_METHODS,
+    GRANT_TYPES,
+    OAuthError,
+    hash_secret,
+    is_allowed_redirect_uri,
+    new_secret,
+    secret_matches,
+)
 
 
-AUTH_METHODS = [
-    ("none", "None (public client)"),
-    ("client_secret_post", "Client secret in the request body"),
-    ("client_secret_basic", "Client secret with HTTP Basic"),
-]
+AUTH_METHODS = list(
+    zip(
+        CLIENT_AUTH_METHODS,
+        [
+            "None (public client)",
+            "Client secret in the request body",
+            "Client secret with HTTP Basic",
+        ],
+        strict=True,
+    )
+)
+REGISTRATION_LIMIT = 20
+REGISTRATION_WINDOW = timedelta(hours=1)
+MAX_REDIRECT_URIS = 10
+MAX_CLIENT_NAME_LENGTH = 100
+DEFAULT_CLIENT_NAME = "MCP client"
 # Compared against when the client ID is unknown, so that unknown and known
 # clients take the same time to reject.
 _UNKNOWN_CLIENT_DIGEST = hash_secret("o3p_mcp unknown client")
@@ -100,3 +120,79 @@ class O3pMcpClient(models.Model):
                 "invalid_client", "Client authentication failed.", status=401
             )
         return client
+
+    @api.model
+    def _register_client(self, metadata, ip):
+        """Register a client from RFC 7591 ``metadata``; return the response.
+
+        At most ``REGISTRATION_LIMIT`` clients are registered per address and
+        hour. The client secret, for confidential clients, appears only in the
+        returned response.
+        """
+        since = fields.Datetime.now() - REGISTRATION_WINDOW
+        recent = self.sudo().with_context(active_test=False).search_count(
+            [("registration_ip", "=", ip), ("create_date", ">=", since)]
+        )
+        if recent >= REGISTRATION_LIMIT:
+            raise OAuthError(
+                "temporarily_unavailable",
+                "Too many client registrations from this address; try again later.",
+                status=429,
+            )
+        if not isinstance(metadata, dict):
+            raise OAuthError(
+                "invalid_client_metadata", "The body must be a JSON object."
+            )
+        redirect_uris = metadata.get("redirect_uris")
+        if (
+            not isinstance(redirect_uris, list)
+            or not 0 < len(redirect_uris) <= MAX_REDIRECT_URIS
+            or not all(is_allowed_redirect_uri(uri) for uri in redirect_uris)
+        ):
+            raise OAuthError(
+                "invalid_redirect_uri",
+                "Redirect URIs must be https URLs, http URLs on a loopback host "
+                "or private-use schemes, without a fragment.",
+            )
+        method = metadata.get("token_endpoint_auth_method", "client_secret_basic")
+        grant_types = metadata.get("grant_types", ["authorization_code"])
+        response_types = metadata.get("response_types", ["code"])
+        if (
+            method not in CLIENT_AUTH_METHODS
+            or not isinstance(grant_types, list)
+            or "authorization_code" not in grant_types
+            or not all(grant in GRANT_TYPES for grant in grant_types)
+            or response_types != ["code"]
+        ):
+            raise OAuthError(
+                "invalid_client_metadata",
+                "Supported: response type code, grant types authorization_code "
+                "and refresh_token, authentication methods "
+                + ", ".join(CLIENT_AUTH_METHODS)
+                + ".",
+            )
+        name = metadata.get("client_name")
+        name = name.strip()[:MAX_CLIENT_NAME_LENGTH] if isinstance(name, str) else ""
+        client = self.sudo().create(
+            {
+                "name": name or DEFAULT_CLIENT_NAME,
+                "redirect_uris": list(dict.fromkeys(redirect_uris)),
+                "token_endpoint_auth_method": method,
+                "registration_ip": ip,
+            }
+        )
+        response = {
+            "client_id": client.client_id,
+            "client_id_issued_at": int(
+                client.create_date.replace(tzinfo=timezone.utc).timestamp()
+            ),
+            "client_name": client.name,
+            "redirect_uris": client.redirect_uris,
+            "grant_types": list(dict.fromkeys(grant_types)),
+            "response_types": ["code"],
+            "token_endpoint_auth_method": method,
+        }
+        if method != "none":
+            response["client_secret"] = client._set_new_secret()
+            response["client_secret_expires_at"] = 0
+        return response

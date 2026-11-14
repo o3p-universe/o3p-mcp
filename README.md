@@ -36,6 +36,36 @@ scope.
 - A daily scheduled action deletes expired codes and tokens whose refresh
   token has expired.
 
+## Endpoints
+
+All URLs are relative to `web.base.url`, which is also the issuer.
+
+| Method and path | Purpose |
+|---|---|
+| `GET /.well-known/oauth-authorization-server` | Authorization server metadata (RFC 8414) |
+| `POST /o3p_mcp/oauth/register` | Dynamic client registration (RFC 7591) |
+
+The metadata and registration endpoints answer cross-origin requests
+(`Access-Control-Allow-Origin: *`) and never create a session.
+
+### Client registration
+
+The body is a JSON object with at least `redirect_uris`. Each redirect URI
+must be an `https` URL, an `http` URL on a loopback host (`localhost`,
+`127.0.0.1`, `[::1]`) or a private-use scheme such as
+`com.example.app:/callback`; fragments, user information and schemes such as
+`javascript:`, `data:` or `file:` are refused. Redirect URIs are later
+compared exactly, port included.
+
+`token_endpoint_auth_method` may be `none` (public client),
+`client_secret_post` or `client_secret_basic` (the RFC 7591 default). Grant
+types are `authorization_code` and optionally `refresh_token`; the only
+response type is `code`. Confidential clients receive their `client_secret`
+once, in the registration response.
+
+Each address may register at most 20 clients per hour; further requests get
+HTTP 429 with `Retry-After`.
+
 ## Installation
 
 Copy the `o3p_mcp` folder into an addons path and install **o3p - mcp**, or use

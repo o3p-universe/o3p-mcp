@@ -1,7 +1,9 @@
 import hashlib
 import hmac
+import re
 import secrets
 from datetime import timedelta
+from urllib.parse import urlsplit
 
 from odoo import api, models
 
@@ -15,11 +17,31 @@ SCOPE_GROUPS = {
 }
 SCOPES = tuple(SCOPE_GROUPS)
 
+CLIENT_AUTH_METHODS = ("none", "client_secret_post", "client_secret_basic")
+GRANT_TYPES = ("authorization_code", "refresh_token")
+
+METADATA_PATH = "/.well-known/oauth-authorization-server"
+AUTHORIZE_PATH = "/o3p_mcp/oauth/authorize"
+TOKEN_PATH = "/o3p_mcp/oauth/token"
+REGISTER_PATH = "/o3p_mcp/oauth/register"
+
 CODE_LIFETIME = timedelta(minutes=5)
 DEFAULT_ACCESS_TOKEN_MINUTES = 60
 DEFAULT_REFRESH_TOKEN_DAYS = 30
 # Longer values are never ours: they are rejected before hashing.
 MAX_SECRET_LENGTH = 512
+MAX_REDIRECT_URI_LENGTH = 2000
+
+LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+# Schemes a browser would handle itself instead of handing to an application.
+REJECTED_SCHEMES = frozenset(
+    {
+        "about", "blob", "chrome", "data", "file", "filesystem", "ftp",
+        "javascript", "jar", "mailto", "sms", "tel", "vbscript", "view-source",
+        "ws", "wss",
+    }
+)
+SCHEME_RE = re.compile(r"[a-z][a-z0-9+.\-]*")
 
 
 def new_secret():
@@ -60,6 +82,35 @@ def find_by_secret(model, field, value):
     if record and hmac.compare_digest(record[field], digest):
         return record
     return empty
+
+
+def is_allowed_redirect_uri(uri):
+    """Tell whether ``uri`` may be registered as a redirect URI.
+
+    Allowed: ``https`` URLs, ``http`` URLs on a loopback host and private-use
+    schemes (RFC 8252). Fragments, user information, whitespace and the
+    schemes a browser handles itself are refused.
+    """
+    if (
+        not isinstance(uri, str)
+        or not uri
+        or len(uri) > MAX_REDIRECT_URI_LENGTH
+        or "#" in uri
+        or any(char.isspace() or not char.isprintable() for char in uri)
+    ):
+        return False
+    try:
+        parts = urlsplit(uri)
+        hostname = parts.hostname
+        parts.port  # noqa: B018 - raises ValueError on an invalid port
+    except ValueError:
+        return False
+    scheme = parts.scheme.lower()
+    if scheme in ("http", "https"):
+        if not hostname or parts.username is not None or parts.password is not None:
+            return False
+        return scheme == "https" or hostname in LOOPBACK_HOSTS
+    return bool(SCHEME_RE.fullmatch(scheme)) and scheme not in REJECTED_SCHEMES
 
 
 def parse_scope(value):
@@ -110,6 +161,30 @@ class O3pMcpOauth(models.AbstractModel):
             scope for scope, group in SCOPE_GROUPS.items() if user.has_group(group)
         }
         return scopes if SCOPE_READ in scopes else set()
+
+    @api.model
+    def _issuer(self):
+        """Return the issuer: ``web.base.url`` without a trailing slash."""
+        base_url = self.env["ir.config_parameter"].sudo().get_str("web.base.url")
+        return (base_url or "").rstrip("/")
+
+    @api.model
+    def _metadata(self):
+        """Return the RFC 8414 authorization server metadata."""
+        issuer = self._issuer()
+        return {
+            "issuer": issuer,
+            "authorization_endpoint": f"{issuer}{AUTHORIZE_PATH}",
+            "token_endpoint": f"{issuer}{TOKEN_PATH}",
+            "registration_endpoint": f"{issuer}{REGISTER_PATH}",
+            "scopes_supported": list(SCOPES),
+            "response_types_supported": ["code"],
+            "response_modes_supported": ["query"],
+            "grant_types_supported": list(GRANT_TYPES),
+            "code_challenge_methods_supported": ["S256"],
+            "token_endpoint_auth_methods_supported": list(CLIENT_AUTH_METHODS),
+            "authorization_response_iss_parameter_supported": True,
+        }
 
     @api.model
     def _access_token_lifetime(self):
