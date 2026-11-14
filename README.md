@@ -62,7 +62,8 @@ must be an `https` URL, an `http` URL on a loopback host (`localhost`,
 backslashes, fragments, user information, numeric host names such as
 `127.1` and schemes such as `javascript:`, `data:` or `file:` are refused.
 The same rules apply to redirect URIs edited by an administrator. Redirect URIs are later
-compared exactly, port included.
+compared exactly, except that an `http` redirect URI on a loopback host may
+use any port (RFC 8252 §7.3): scheme, host, path and query must still match.
 
 `token_endpoint_auth_method` may be `none` (public client),
 `client_secret_post` or `client_secret_basic` (the RFC 7591 default). Grant
@@ -81,9 +82,10 @@ HTTP 429 with `Retry-After`.
 
 - A visitor who is not signed in is sent to the Odoo login page and comes
   back afterwards.
-- An unknown or archived client, or a redirect URI that is not exactly one of
-  the client's registered URIs, shows an error page; Odoo never redirects to
-  an unregistered URI. When the client has a single redirect URI,
+- An unknown or archived client, or a redirect URI that does not match one
+  of the client's registered URIs, shows an error page; Odoo never redirects
+  to an unregistered URI. Matching is exact apart from the port of loopback
+  `http` URIs. When the client has a single redirect URI,
   `redirect_uri` may be omitted.
 - PKCE with `S256` is required; `plain` is refused.
 - `resource` must be the configured MCP URL (a trailing slash is ignored).
@@ -117,8 +119,8 @@ Basic for `client_secret_basic`. Mixing Basic with body credentials is
 refused. Responses carry `Cache-Control: no-store`.
 
 - `grant_type=authorization_code` with `code`, `code_verifier`,
-  `redirect_uri` (exactly the one used at authorization; it may be omitted
-  only when the client has a single redirect URI) and optionally `resource`.
+  `redirect_uri` (the one used at authorization, under the same matching
+  rule; it may be omitted only when the client has a single redirect URI) and optionally `resource`.
   A code is consumed by its first exchange, successful or not; presenting it
   again revokes the tokens it was exchanged for.
 - `grant_type=refresh_token` with `refresh_token` and optionally `scope`

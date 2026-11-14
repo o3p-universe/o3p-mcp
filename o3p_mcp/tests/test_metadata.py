@@ -4,7 +4,7 @@ import re
 
 from odoo.tests import HttpCase, TransactionCase, tagged
 
-from ..models.oauth import display_target, is_allowed_redirect_uri
+from ..models.oauth import display_target, is_allowed_redirect_uri, redirect_uri_matches
 
 
 METADATA_URL = "/.well-known/oauth-authorization-server"
@@ -63,6 +63,27 @@ class TestRedirectUriPolicy(TransactionCase):
             with self.subTest(uri=uri):
                 self.assertFalse(is_allowed_redirect_uri(uri))
 
+
+    def test_loopback_redirect_uris_match_any_port(self):
+        for registered, presented, matches in (
+            ("http://127.0.0.1:33418/callback", "http://127.0.0.1:50123/callback", True),
+            ("http://127.0.0.1/callback", "http://127.0.0.1:50123/callback", True),
+            ("http://localhost:6274/cb?x=1", "http://localhost:1/cb?x=1", True),
+            ("http://[::1]:8080/cb", "http://[::1]:9090/cb", True),
+            ("http://127.0.0.1:33418/callback", "http://127.0.0.1:50123/other", False),
+            ("http://127.0.0.1:33418/callback", "http://localhost:33418/callback", False),
+            ("http://localhost:6274/cb?x=1", "http://localhost:6274/cb?x=2", False),
+            ("http://127.0.0.1:33418/callback", "https://127.0.0.1:33418/callback", False),
+            ("http://127.0.0.1:33418/callback", "http://127.0.0.1:50123/callback#x", False),
+            ("http://127.0.0.1:33418/callback", "http://127.0.0.1:99999/callback", False),
+            ("https://app.example.com/cb", "https://app.example.com:8443/cb", False),
+            ("https://app.example.com/cb", "https://app.example.com/cb", True),
+            ("https://app.example.com/cb", "https://APP.example.com/cb", False),
+            ("com.example.app:/cb", "com.example.app:/cb", True),
+            ("https://app.example.com/cb", None, False),
+        ):
+            with self.subTest(registered=registered, presented=presented):
+                self.assertEqual(redirect_uri_matches(registered, presented), matches)
 
     def test_display_target(self):
         for uri, shown in (

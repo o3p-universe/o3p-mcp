@@ -166,6 +166,29 @@ def is_allowed_redirect_uri(uri):
     return bool(SCHEME_RE.fullmatch(scheme)) and scheme not in REJECTED_SCHEMES
 
 
+def redirect_uri_matches(registered, presented):
+    """Tell whether ``presented`` designates the registered redirect URI.
+
+    The match is exact, except that an http redirect URI on a loopback host
+    may use any port (RFC 8252 section 7.3): scheme, host, path and query
+    must still be identical.
+    """
+    if not isinstance(presented, str) or not presented:
+        return False
+    if presented == registered:
+        return True
+    if not is_allowed_redirect_uri(presented):
+        return False
+    expected, actual = urlsplit(registered), urlsplit(presented)
+    return (
+        expected.scheme == actual.scheme == "http"
+        and expected.hostname in LOOPBACK_HOSTS
+        and expected.hostname == actual.hostname
+        and expected.path == actual.path
+        and expected.query == actual.query
+    )
+
+
 def is_valid_issuer(value):
     """Tell whether ``value`` may be the issuer: an https origin, or http on a
     loopback host, without path, query, fragment or user information."""
@@ -314,7 +337,7 @@ class O3pMcpOauth(models.AbstractModel):
         redirect_uri = params.get("redirect_uri")
         if not redirect_uri and len(registered) == 1:
             redirect_uri = registered[0]
-        elif redirect_uri not in registered:
+        elif not any(redirect_uri_matches(uri, redirect_uri) for uri in registered):
             raise AuthorizationError(
                 "invalid_request",
                 _("The redirect URI is not registered for this application."),

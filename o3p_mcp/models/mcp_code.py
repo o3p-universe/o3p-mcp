@@ -9,6 +9,7 @@ from .oauth import (
     new_secret,
     parse_scope,
     pkce_matches,
+    redirect_uri_matches,
     same_resource,
     scope_string,
 )
@@ -107,11 +108,14 @@ class O3pMcpCode(models.Model):
             raise OAuthError("invalid_grant", "The authorization code was already used.")
         if record.expires_at <= fields.Datetime.now():
             raise OAuthError("invalid_grant", "The authorization code has expired.")
+        registered = client.redirect_uris or []
         if redirect_uri:
-            same_redirect = redirect_uri == record.redirect_uri
+            same_redirect = redirect_uri_matches(record.redirect_uri, redirect_uri)
         else:
             # Allowed only where the authorization request could omit it too.
-            same_redirect = client.redirect_uris == [record.redirect_uri]
+            same_redirect = len(registered) == 1 and redirect_uri_matches(
+                registered[0], record.redirect_uri
+            )
         if not same_redirect:
             raise OAuthError(
                 "invalid_grant", "The redirect URI does not match the authorization."

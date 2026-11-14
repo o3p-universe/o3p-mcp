@@ -4,7 +4,7 @@ from datetime import timedelta
 from odoo import fields
 from odoo.tests import tagged
 
-from .common import REDIRECT_URI, RESOURCE, O3pMcpHttpCase
+from .common import REDIRECT_URI, RESOURCE, O3pMcpHttpCase, location_of
 
 
 TOKEN_URL = "/o3p_mcp/oauth/token"
@@ -113,6 +113,43 @@ class TestTokenEndpoint(O3pMcpTokenCase):
         # The only registered redirect URI may be left out, as at authorization.
         response = self.exchange(self.authorize_code(), redirect_uri=None)
         self.assertEqual(response.status_code, 200, response.text)
+
+    def test_loopback_port_may_change(self):
+        # Review probe: native clients listen on a port chosen at run time.
+        self.client.redirect_uris = ["http://127.0.0.1:33418/callback"]
+        uri = "http://127.0.0.1:50123/callback"
+        self.authenticate("o3p_mcp_editor", "o3p_mcp_editor")
+        response = self.decide("approve", redirect_uri=uri)
+        self.assertEqual(response.status_code, 303)
+        self.assertTrue(response.headers["Location"].startswith(f"{uri}?code="))
+        code = location_of(response)[1]["code"]
+        self.assertEqual(self.Code.search([]).redirect_uri, uri)
+        self.assertEqual(self.exchange(code, redirect_uri=uri).status_code, 200)
+        code = self.authorize_code(redirect_uri=uri)
+        self.assertEqual(
+            self.exchange(code, redirect_uri="http://127.0.0.1:50999/callback").status_code,
+            200,
+        )
+        code = self.authorize_code(redirect_uri=uri)
+        self.assertTokenError(
+            self.exchange(code, redirect_uri="http://127.0.0.1:50123/other"),
+            "invalid_grant",
+        )
+        for other in (
+            "http://127.0.0.1:50123/other",
+            "http://localhost:50123/callback",
+            "http://127.0.0.1:50123/callback?x=1",
+        ):
+            with self.subTest(other=other):
+                page = self.get_consent(redirect_uri=other)
+                self.assertEqual(page.status_code, 400)
+                self.assertNotIn("Location", page.headers)
+
+    def test_other_ports_are_exact_elsewhere(self):
+        self.authenticate("o3p_mcp_editor", "o3p_mcp_editor")
+        page = self.get_consent(redirect_uri="https://client.example.com:8443/callback")
+        self.assertEqual(page.status_code, 400)
+        self.assertNotIn("Location", page.headers)
 
     def test_expired_code(self):
         code = self.authorize_code()
