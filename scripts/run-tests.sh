@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Install o3p_mcp in a throw-away database and run its tests.
+#
+# Usage: scripts/run-tests.sh [TEST_TAGS]     (default: /o3p_mcp)
+#
+# Starts PostgreSQL 17 and Odoo 20 with docker compose (project
+# "o3p-mcp-test"), runs the tests once and removes the containers and
+# volumes again. Exits non-zero when the install or any test fails.
+set -euo pipefail
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+tags=${1:-/o3p_mcp}
+compose=(docker compose -p o3p-mcp-test -f "$here/compose.test.yaml")
+log=$(mktemp)
+
+cleanup() {
+    "${compose[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
+    rm -f "$log"
+}
+trap cleanup EXIT
+
+"${compose[@]}" up -d --wait db >/dev/null
+
+set +e
+"${compose[@]}" run --rm --no-deps odoo odoo \
+    --addons-path=/mnt/o3p-mcp \
+    -d o3p_mcp_test -i o3p_mcp \
+    --test-enable --test-tags "$tags" \
+    --stop-after-init 2>&1 | tee "$log"
+status=${PIPESTATUS[0]}
+set -e
+
+summary=$(grep -E 'odoo\.tests\.result: ' "$log" | tail -n 1 | sed -E 's/.*odoo\.tests\.result: //' || true)
+echo
+echo "odoo exit status: $status"
+echo "tests: ${summary:-no test summary found}"
+
+if [ "$status" -ne 0 ] || [ -z "$summary" ] || grep -qE ' (ERROR|CRITICAL) ' "$log"; then
+    echo "FAILED"
+    exit 1
+fi
+echo "OK"

@@ -1,0 +1,19 @@
+{
+  "schema_version": 2,
+  "name": "O3P MCP",
+  "database": "",
+  "odoo": {
+    "selector": "auto",
+    "addons_dir": ""
+  },
+  "install": {
+    "restart": true,
+    "refresh_apps": true
+  },
+  "modules": [
+    {
+      "name": "o3p_mcp",
+      "github_repository": "https://github.com/o3p-universe/o3p-mcp.git"
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+# Test stack for scripts/run-tests.sh: PostgreSQL 17 and Odoo 20 with this
+# repository mounted read-only as an addons path.
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: odoo
+      POSTGRES_PASSWORD: odoo
+      POSTGRES_DB: postgres
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U odoo -d postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  odoo:
+    image: odoo:20.0
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      HOST: db
+      USER: odoo
+      PASSWORD: odoo
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ..:/mnt/o3p-mcp:ro
+    # Read the bind mount without relabelling the host files (SELinux hosts).
+    security_opt:
+      - label:disable
