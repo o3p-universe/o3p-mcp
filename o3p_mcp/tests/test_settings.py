@@ -164,7 +164,43 @@ class TestSettings(O3pMcpCommon, TransactionCase):
         self.assertEqual(action["params"]["type"], "danger")
         self.assertIn("ConnectionError", action["params"]["message"])
 
+    def test_data_api_settings(self):
+        params = self.env["ir.config_parameter"]
+        settings = self.settings()
+        self.assertIn("o3p.mcp.*", settings.o3p_mcp_api_denied_models.splitlines())
+        self.assertIn("*password*", settings.o3p_mcp_api_denied_fields.splitlines())
+        self.assertEqual(settings.o3p_mcp_api_max_response_kb, 1000)
+        self.env["res.config.settings"].create(
+            {
+                "o3p_mcp_api_denied_models": "o3p.mcp.*, ir.config_parameter\nres.bank",
+                "o3p_mcp_api_denied_fields": "",
+                "o3p_mcp_api_max_response_kb": 50,
+                "o3p_mcp_api_timeout_seconds": 5,
+                "o3p_mcp_api_log_days": 7,
+            }
+        ).execute()
+        self.assertEqual(
+            params.get_str("o3p_mcp.api_denied_models"), "o3p.mcp.*\nir.config_parameter\nres.bank"
+        )
+        # An empty list restores the default.
+        self.assertIn("*password*", params.get_str("o3p_mcp.api_denied_fields"))
+        self.assertEqual(params.get_int("o3p_mcp.api_max_response_bytes"), 50_000)
+        self.assertEqual(params.get_int("o3p_mcp.api_timeout_seconds"), 5)
+        self.assertEqual(params.get_int("o3p_mcp.api_log_days"), 7)
+        api = self.env["o3p.mcp.api"]
+        self.assertTrue(api._model_denied("res.bank"))
+        self.assertEqual(api._timeout_seconds(), 5)
+        for values in (
+            {"o3p_mcp_api_max_response_kb": 0},
+            {"o3p_mcp_api_timeout_seconds": 301},
+            {"o3p_mcp_api_log_days": 0},
+        ):
+            with self.subTest(values=values), self.assertRaises(UserError):
+                self.env["res.config.settings"].create(values).execute()
+
     def test_views_load(self):
+        views = self.env["o3p.mcp.api.log"].get_views([(False, "list"), (False, "search")])
+        self.assertEqual(set(views["views"]), {"list", "search"})
         for model in ("o3p.mcp.client", "o3p.mcp.token"):
             with self.subTest(model=model):
                 views = self.env[model].get_views(
@@ -180,6 +216,9 @@ class TestSettings(O3pMcpCommon, TransactionCase):
             "o3p_mcp_refresh_token_days",
             "action_o3p_mcp_rotate_credentials",
             "action_o3p_mcp_check_health",
+            "o3p_mcp_api_denied_models",
+            "o3p_mcp_api_denied_fields",
+            "o3p_mcp_api_timeout_seconds",
         ):
             self.assertIn(name, arch)
         for xmlid in (
