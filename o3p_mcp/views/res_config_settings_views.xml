@@ -122,6 +122,10 @@
                                     <field name="o3p_mcp_sql_sslmode"/>
                                 </div>
                                 <div class="row">
+                                    <label for="o3p_mcp_sql_sslrootcert" class="col-lg-4 o_light_label"/>
+                                    <field name="o3p_mcp_sql_sslrootcert" placeholder="system"/>
+                                </div>
+                                <div class="row">
                                     <label for="o3p_mcp_sql_password_source" class="col-lg-4 o_light_label"/>
                                     <field name="o3p_mcp_sql_password_source" readonly="1"/>
                                 </div>

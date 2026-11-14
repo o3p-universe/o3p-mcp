@@ -480,7 +480,8 @@ values under `o3p_mcp.*`:
 | SQL sandbox database | `o3p_mcp.sql_database` | `o3p_sqlbox` |
 | SQL sandbox role prefix (roles `<prefix>_1` … `<prefix>_<count>`) | `o3p_mcp.sql_user` | `o3p_sqlbox` |
 | SQL sandbox role count: queries running at once over all users, 1 to 100 | `o3p_mcp.sql_roles` | 4 |
-| SQL sandbox SSL mode (libpq `sslmode`) | `o3p_mcp.sql_sslmode` | `prefer` |
+| SQL sandbox SSL mode (libpq `sslmode`, or `auto`: see SQL sandbox setup) | `o3p_mcp.sql_sslmode` | `auto` |
+| SQL sandbox CA certificates (libpq `sslrootcert`: a file, or `system`) | `o3p_mcp.sql_sslrootcert` | empty (libpq's default) |
 | SQL queries per user at once, 1 to 64 | `o3p_mcp.sql_user_concurrency` | 2 |
 | SQL rows per table | `o3p_mcp.sql_max_rows` | 200000 |
 | SQL data copied per query (MB; stored in bytes) | `o3p_mcp.sql_max_copy_bytes` | 64 MB |
@@ -506,7 +507,9 @@ a connection limit other than 1, a role membership, a privilege beyond
 create objects in, relations or extensions in the sandbox database, another
 database the role may enter, file or large-object functions it may run, a
 sandbox on the server that holds the Odoo database, or a role that can log
-in to the Odoo database. It notes an unlimited `temp_file_limit`.
+in to the Odoo database. It notes an unlimited `temp_file_limit` and whether
+the connections are encrypted, and warns when the sandbox is not on this
+host and the SSL mode is weaker than `verify-full`.
 
 ## Management
 
@@ -650,6 +653,18 @@ run on temporary storage.
 3. In **Settings › MCP › SQL**, enter the sandbox host (and port, database,
    role prefix and count if they differ), save, and press **Check SQL
    sandbox**.
+
+Rows the user may read travel from Odoo to the sandbox and the answer
+back, so the connection must not be readable or changeable on the way. The
+SSL mode setting `auto` (the default) uses `prefer` for a sandbox on the
+same host as Odoo, that is a unix socket directory (`/var/run/postgresql`),
+`localhost`, a loopback address, or a single-label host name such as a
+Docker or Compose service name (`sandbox`), and `verify-full` for any other
+host: the sandbox server then needs a TLS certificate for its host name,
+and Odoo the CA that signed it (the CA certificates setting, or `system`
+for the system's CA store). A single-label name that is not on the same
+host needs the SSL mode set explicitly. Any explicit mode is used as set;
+**Check SQL sandbox** warns about a remote sandbox without `verify-full`.
 
 Each Odoo database needs its own sandbox roles (another prefix, or another
 server): the advisory locks that hand out roles are per Odoo database. The
