@@ -113,11 +113,27 @@ class O3pMcpApiCase(O3pMcpCommon, HttpCase):
         self.assertEqual(response.status_code, expected_status, response.text)
         body = response.json()
         self.assertEqual(list(body), ["error"])
-        self.assertEqual(set(body["error"]), {"code", "message"})
+        self.assertLessEqual(set(body["error"]), {"code", "message", "details"})
         self.assertEqual(body["error"]["code"], code)
         self.assertIsInstance(body["error"]["message"], str)
         self.assertEqual(response.headers["Cache-Control"], "no-store")
         return body["error"]["message"]
+
+    def assertDetails(self, response, code, reason, field=None, model=None):
+        """Check the error's details: the fixed reason and hint, and where."""
+        from ..models.api import MODEL_HINTS, REASONS
+
+        self.assertApiError(response, code)
+        details = response.json()["error"]["details"]
+        expected = {}
+        if field is not None:
+            expected["field"] = field
+        if model is not None:
+            expected["model"] = model
+        expected["reason"] = reason
+        expected["hint"] = (reason == "no_model_access" and MODEL_HINTS.get(model)) or REASONS[reason]
+        self.assertEqual(details, expected)
+        return details
 
     @contextmanager
     def protected_field(self, model, field_name, groups="base.group_system"):
