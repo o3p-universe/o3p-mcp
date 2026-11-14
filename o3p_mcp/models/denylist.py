@@ -37,12 +37,6 @@ SQL_DENIED_MODELS = (
     "ir.attachment",
     "mail.message",
 )
-# Odoo 18: models whose class overrides how records are read, reviewed as
-# safe for SQL. res.users only lets users read their own SELF_READABLE_FIELDS
-# with elevated rights (a widening SQL does not reproduce) and adds the
-# non-stored "reified" group fields of the user form; its private fields are
-# hidden by the field patterns below.
-SQL_REVIEWED_READ_OVERRIDES = ("res.users",)
 # Field names hidden on every model. Binary fields, and relational fields to
 # a hidden model, are hidden too.
 DEFAULT_DENIED_FIELDS = (

@@ -611,8 +611,10 @@ at once in Odoo (the MCP server may cache an answer for up to a minute).
   to fields the user may read (`Field.is_accessible`). `res.users`
   customises its reads only to let users read their own fields with
   elevated rights and to add non-stored group fields, so it is reviewed as
-  safe for SQL (`SQL_REVIEWED_READ_OVERRIDES` in `models/denylist.py`);
-  other models whose reads an addon customises stay hidden from SQL.
+  safe for SQL (`READ_OVERRIDES_REVIEWED` in `models/denylist.py`, the
+  review shared with the other operations);
+  other models whose reads an addon customises stay hidden from SQL
+  unless that review lists them.
   The SQL answers and error envelopes are the 20.0 branch's, byte for byte
   (see Tests).
 

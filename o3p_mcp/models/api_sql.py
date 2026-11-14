@@ -35,7 +35,7 @@ from odoo import api, models
 from odoo.tools import SQL, config, ormcache
 
 from .api import ApiError
-from .denylist import SQL_DENIED_MODELS, SQL_REVIEWED_READ_OVERRIDES, model_denied
+from .denylist import READ_OVERRIDES_REVIEWED, SQL_DENIED_MODELS, model_denied, overrides_read
 from .oauth import get_config, get_config_int
 
 
@@ -85,11 +85,6 @@ CURSOR_NAME = "o3p_mcp_rows"
 LOCK_SANDBOX_ROLE = 55_623_681
 LOCK_USER_SLOT = 55_623_682
 MAX_USER_SLOTS = 64
-# Methods that change what a read returns after the search: a model whose
-# class overrides one of them is not exposed to SQL.
-READ_OVERRIDES = ("read", "_read", "fetch", "_fetch_query", "search_fetch", "_read_format")
-# Modules defining the ORM's own model classes (Odoo 18: odoo.models).
-ORM_MODULES = ("odoo.models", "odoo.orm.")
 
 MSG_ONE_SELECT = "Only one SELECT statement is allowed (no INTO, FOR UPDATE or FOR SHARE)."
 MSG_TOO_MANY_ROWS = (
@@ -388,15 +383,14 @@ class O3pMcpApiSql(models.AbstractModel):
     @api.model
     @ormcache("name")
     def _sql_model_overrides_read(self, name):
-        """Tell whether a module overrides how model ``name`` reads records."""
-        if name in SQL_REVIEWED_READ_OVERRIDES:
-            return False
-        cls = type(self.env[name])
-        for method in READ_OVERRIDES:
-            owner = next((klass for klass in cls.__mro__ if method in vars(klass)), None)
-            if owner is not None and not owner.__module__.startswith(ORM_MODULES):
-                return True
-        return False
+        """Tell whether an addon changes what model ``name``'s reads return.
+
+        The shared denylist module decides, as for the other operations:
+        a read override hides values that a copy of the rows would show,
+        unless the override is in its reviewed list (on Odoo 18 it includes
+        res.users).
+        """
+        return name not in READ_OVERRIDES_REVIEWED and overrides_read(type(self.env[name]))
 
     def _sql_model_denied(self, name):
         """Models SQL never exposes: the data API's hidden models (the shared
