@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
 # End-to-end check of o3p_mcp with okf-mcp over Streamable HTTP, including
-# the Odoo data tools of okf-odoo (plan steps C8 and D4).
+# the Odoo data tools of okf-odoo and permission-scoped SQL (plan steps C8,
+# D4 and E4).
 #
 # Usage: e2e/run.sh [--only 1,2,9,d]
 #
-# 1. Starts PostgreSQL 17, Odoo 20 (one database, dbfilter, proxy_mode,
-#    --workers=0) and nginx in front of it with docker compose, project
-#    "o3p-e2e", all on the host network (see compose.yaml).
+# 1. Starts PostgreSQL 17, a second PostgreSQL 17 instance as the SQL sandbox
+#    (the addon's scripts/sandbox-init.sh and sandbox-setup.sql), Odoo 20 with
+#    pglast (the addon's scripts/Dockerfile.test; one database, dbfilter,
+#    proxy_mode, --workers=0) and nginx in front of it with docker compose,
+#    project "o3p-e2e", all on the host network (see compose.yaml).
 # 2. Installs o3p_mcp and sale; setup.py sets the issuer and MCP URL, creates
 #    the introspection credentials and the C8 users; setup_sales.py creates
-#    the sales users, customers, products and orders, the API key the
-#    okf-odoo producer reads metadata with, and what the ORM gives each user.
+#    the sales users, customers, products and orders, 30,000 contacts, the
+#    API key the okf-odoo producer reads metadata with, configures the SQL
+#    sandbox and presses its check button, and records what the ORM gives
+#    each user.
 # 3. suite.mjs builds an okf project in a temporary directory (a small
 #    bundle in its own git repository, the `odoo` bundle the okf-odoo
 #    producer generates, the okf-odoo tool pack), starts okf-mcp (two
@@ -23,7 +28,8 @@
 # okf-mcp and okf-odoo come from the package.json dependencies (paths to
 # checkouts with their dependencies installed); OKF_MCP_DIR overrides okf-mcp.
 # Ports: E2E_ODOO_PORT (18069, the issuer), E2E_ODOO_INTERNAL_PORT (18070),
-# E2E_DB_PORT (15432), E2E_MCP_PORT (18766), E2E_MCP2_PORT (18767).
+# E2E_DB_PORT (15432), E2E_SANDBOX_PORT (15433), E2E_MCP_PORT (18766),
+# E2E_MCP2_PORT (18767). O3P_SQL_PASSWORD sets the sandbox roles' password.
 # Exits non-zero when a check fails.
 set -euo pipefail
 
@@ -31,6 +37,7 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 export E2E_ODOO_PORT=${E2E_ODOO_PORT:-18069}
 export E2E_ODOO_INTERNAL_PORT=${E2E_ODOO_INTERNAL_PORT:-18070}
 export E2E_DB_PORT=${E2E_DB_PORT:-15432}
+export E2E_SANDBOX_PORT=${E2E_SANDBOX_PORT:-15433}
 export E2E_MCP_PORT=${E2E_MCP_PORT:-18766}
 export E2E_MCP2_PORT=${E2E_MCP2_PORT:-18767}
 issuer="http://localhost:${E2E_ODOO_PORT}"
@@ -54,7 +61,7 @@ step() { printf '\n== %s\n' "$*"; }
 seconds() { echo $(( $(date +%s%N) / 1000000 )); }
 shell() {
     "${compose[@]}" run --rm --no-deps -T \
-        -e E2E_ISSUER="$issuer" -e E2E_MCP_URL="$mcp_url" \
+        -e E2E_ISSUER="$issuer" -e E2E_MCP_URL="$mcp_url" -e E2E_SANDBOX_PORT \
         odoo odoo shell -d o3p_e2e --no-http --log-level=warn
 }
 
@@ -68,7 +75,8 @@ else
     step "Odoo stack (project o3p-e2e)"
     started=$(seconds)
     "${compose[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
-    "${compose[@]}" up -d --wait db
+    "${compose[@]}" build --quiet odoo
+    "${compose[@]}" up -d --wait db sandbox
     "${compose[@]}" run --rm --no-deps -T odoo odoo -d o3p_e2e -i o3p_mcp,sale \
         --stop-after-init --no-http --log-level=warn
     echo "installed in $(( $(seconds) - started )) ms"

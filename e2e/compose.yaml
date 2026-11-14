@@ -1,4 +1,6 @@
-# End-to-end stack: PostgreSQL 17, Odoo 20 with o3p_mcp, and nginx as the
+# End-to-end stack: PostgreSQL 17, Odoo 20 with o3p_mcp (and pglast, from the
+# addon's scripts/Dockerfile.test), a second PostgreSQL 17 instance as the SQL
+# sandbox (set up by the addon's scripts/sandbox-setup.sql), and nginx as the
 # reverse proxy in front of Odoo (proxy_mode needs X-Forwarded-* headers).
 #
 # Every service shares the host network so that Odoo, okf-mcp (a host
@@ -9,6 +11,7 @@
 #   proxy  127.0.0.1:${E2E_ODOO_PORT:-18069}   public Odoo URL (the issuer)
 #   odoo   127.0.0.1:${E2E_ODOO_INTERNAL_PORT:-18070}
 #   db     127.0.0.1:${E2E_DB_PORT:-15432}
+#   sandbox 127.0.0.1:${E2E_SANDBOX_PORT:-15433}
 name: o3p-e2e
 
 services:
@@ -37,11 +40,42 @@ services:
       timeout: 5s
       retries: 30
 
+  # The SQL sandbox: its own instance, an empty database and powerless
+  # roles, created at first start by the addon's own scripts.
+  sandbox:
+    image: postgres:17
+    network_mode: host
+    environment:
+      PGPORT: ${E2E_SANDBOX_PORT:-15433}
+      POSTGRES_USER: sandbox_admin
+      POSTGRES_PASSWORD: sandbox-admin-e2e
+      POSTGRES_DB: postgres
+      O3P_SQL_PASSWORD: ${O3P_SQL_PASSWORD:-o3p-sql-e2e}
+      O3P_SQL_ROLES: "4"
+    command: ["postgres", "-c", "listen_addresses=127.0.0.1", "-c", "shared_buffers=64MB", "-c", "max_connections=30"]
+    tmpfs:
+      - /var/lib/postgresql/data
+    volumes:
+      - ../scripts/sandbox-init.sh:/docker-entrypoint-initdb.d/o3p-sandbox.sh:ro
+      - ../scripts/sandbox-setup.sql:/o3p/sandbox-setup.sql:ro
+    security_opt:
+      - label:disable
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p ${E2E_SANDBOX_PORT:-15433} -U sandbox_admin -d o3p_sqlbox"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
   odoo:
-    image: odoo:20.0
+    build:
+      context: ../scripts
+      dockerfile: Dockerfile.test
+    image: o3p-e2e-odoo:20.0
     network_mode: host
     depends_on:
       db:
+        condition: service_healthy
+      sandbox:
         condition: service_healthy
     environment:
       HOST: 127.0.0.1
@@ -49,6 +83,7 @@ services:
       USER: odoo
       PASSWORD: odoo
       PYTHONDONTWRITEBYTECODE: "1"
+      O3P_SQL_PASSWORD: ${O3P_SQL_PASSWORD:-o3p-sql-e2e}
     command:
       - odoo
       - --database=o3p_e2e

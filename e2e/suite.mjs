@@ -10,6 +10,7 @@ import { parseArgs } from "node:util";
 
 import { Browser, parseForms, visibleText } from "./lib/browser.mjs";
 import { runD4 } from "./d4.mjs";
+import { runE4 } from "./e4.mjs";
 import { SERVER_IDENTITY, createBundle, git } from "./lib/bundle.mjs";
 import { connectWithToken, signIn, toolJson, toolNames } from "./lib/mcp.mjs";
 import { mcpPost, startOkf, waitFor } from "./lib/okf.mjs";
@@ -885,15 +886,20 @@ async function scenario9() {
     return "introspection inactive, refresh invalid_client";
   });
 
-  {
-    const browser = new Browser(ISSUER);
-    const { challenge } = pkce();
-    const answer = await browser.authorize(
-      oauth.authorizeUrl({ response_type: "code", client_id: sharedClient.client_id, redirect_uri: sharedClient.redirect_uris[0], state: "s", scope: "okf.read okf.write offline_access", code_challenge: challenge, code_challenge_method: "S256", resource: MCP_URL }),
-      { login: USERS.editor.login, password: PASSWORD },
-    );
-    info("9", `a request adding an unsupported scope (offline_access): ${answer.outcome === "page" ? `error page HTTP ${answer.page.status} "${visibleText(answer.page.html).match(/Supported scopes.*?required\./)?.[0]}"` : answer.outcome}`);
-  }
+  await check("9z2", "A request adding scopes Odoo does not know (offline_access, profile) is served with the known ones", async () => {
+    const flow = await oauth.codeFlow({
+      browser: new Browser(ISSUER),
+      login: USERS.editor.login,
+      password: PASSWORD,
+      client: sharedClient,
+      redirectUri: sharedClient.redirect_uris[0],
+      resource: MCP_URL,
+      scope: "okf.read okf.write offline_access profile",
+    });
+    assert(flow.exchange?.status === 200, `outcome ${flow.authorization.outcome} ${flow.authorization.page?.status ?? ""} ${flow.exchange?.status ?? ""}`);
+    assert(flow.exchange.body.scope === "okf.read okf.write", `granted ${flow.exchange.body.scope}`);
+    return `granted "${flow.exchange.body.scope}"`;
+  });
 
   await checkCors();
 }
@@ -931,17 +937,10 @@ async function checkCors() {
     assert(entry.ok, `preflight HTTP ${entry.status}, allow-origin ${entry.allowOrigin}, allow-headers "${entry.allowHeaders}"`);
     return `HTTP ${entry.status}, allow-headers "${entry.allowHeaders}"`;
   });
-  await check("9q2", "Browser client: authorization-server metadata discovery works cross-origin (with the SDK's retry without custom headers)", async () => {
-    const notes = [];
-    for (const entry of report.filter((item) => item.label.includes("metadata"))) {
-      if (entry.ok) continue;
-      const url = entry.label.includes("protected") ? prmUrl : `${ISSUER}/.well-known/oauth-authorization-server`;
-      const plain = await fetch(url, { headers: { origin } });
-      const allow = plain.headers.get("access-control-allow-origin");
-      assert(plain.status === 200 && (allow === "*" || allow === origin), `${entry.label}: plain GET not readable either`);
-      notes.push(`${entry.label.split(" with")[0]}: preflight refused (HTTP ${entry.status}), plain GET readable`);
-    }
-    return notes.length ? notes.join("; ") : "preflights allowed";
+  await check("9q2", "Browser client: Odoo answers the authorization-server metadata preflight (MCP-Protocol-Version allowed)", async () => {
+    const entry = report.find((item) => item.label.startsWith("GET AS metadata"));
+    assert(entry.ok, `preflight HTTP ${entry.status}, allow-origin ${entry.allowOrigin}, allow-headers "${entry.allowHeaders}"`);
+    return `HTTP ${entry.status}, allow-headers "${entry.allowHeaders}"`;
   });
   await check("9r", "Foreign browser origin is refused by okf-mcp (403, no CORS headers)", async () => {
     const answer = await fetch(MCP_URL, { method: "POST", headers: { origin: "https://evil.example", "content-type": "application/json", authorization: `Bearer ${state.user.tokens.access_token}` }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }) });
@@ -981,7 +980,9 @@ async function expiryCheck(result) {
 
 // Registration limit (last: it uses up the address's registrations).
 async function registrationLimit() {
-  await check("9t", "Registration limit: 429 with Retry-After once 20 clients/hour came from one address; X-Forwarded-For cannot dodge it", async () => {
+  await check("9t", "Registration limit (a setting, here lowered to 20/hour): 429 with Retry-After from one address; X-Forwarded-For cannot dodge it", async () => {
+    const admin = await adminSession();
+    await admin.saveSettings({ o3p_mcp_registration_limit: 20 });
     let created = 0;
     let limited;
     for (let attempt = 0; attempt < 25; attempt += 1) {
@@ -995,7 +996,10 @@ async function registrationLimit() {
     assert(limited?.status === 429 && limited.headers.get("retry-after"), `no 429 after ${created} registrations`);
     const spoofed = await fetch(`${ISSUER}/o3p_mcp/oauth/register`, { method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": "203.0.113.7" }, body: JSON.stringify({ redirect_uris: ["http://127.0.0.1:18999/callback"] }) });
     assert(spoofed.status === 429, `spoofed X-Forwarded-For answered ${spoofed.status}`);
-    return `429 after ${created} more registrations in this run; spoofed X-Forwarded-For → 429`;
+    await admin.saveSettings({ o3p_mcp_registration_limit: 200 });
+    const again = await oauth.register({ client_name: "after raising the limit", redirect_uris: ["http://127.0.0.1:18999/callback"], token_endpoint_auth_method: "none" });
+    assert(again.status === 201, `after raising the limit: ${again.status}`);
+    return `429 after ${created} more registrations in this run; spoofed X-Forwarded-For → 429; raised back to 200 → 201`;
   });
 }
 
@@ -1040,6 +1044,24 @@ async function main() {
     if (wanted(7)) await scenario7();
     if (wanted(8)) await scenario8();
     if (wanted(9)) await scenario9();
+    const extended = {
+      check,
+      info,
+      assert,
+      setup,
+      sales,
+      oauth,
+      state,
+      ISSUER,
+      MCP_URL,
+      toolJson,
+      mcpPost,
+      adminSession,
+      sharedClient: () => sharedClient,
+      signInAs: (login, options = {}) =>
+        timedSignIn({ mcpUrl: MCP_URL, issuer: ISSUER, login, password: PASSWORD, clientInformation: sharedClient, ...options }),
+    };
+    if (sales && wanted("e")) await runE4(extended);
     if (sales && wanted("d")) {
       await runD4({
         check,

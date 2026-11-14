@@ -114,8 +114,8 @@ export async function runD4(ctx) {
     assert(tools.slice(firstPack).every((name) => name.startsWith("odoo_")), "pack tools interleaved with core tools");
     const producerTools = tools.filter((name) => name.includes("producer"));
     const preview = await call(A, "okf_preview_producer", { producer: "odoo" });
-    info("D0b", `a plain MCP user (okf.read) also sees ${producerTools.join(", ")}; okf_preview_producer as the salesperson → ${preview.ok ? `ran (${json(preview.result).slice(0, 80)})` : preview.code}`);
-    return odoo.join(", ");
+    assert(producerTools.length === 0 && !preview.ok, `a plain MCP user sees ${producerTools.join(", ")}; preview → ${preview.ok ? "ran" : preview.code}`);
+    return `${odoo.join(", ")}; producer tools not offered without okf.write (preview → ${preview.code})`;
   });
 
   // -------------------------------------------------------------------------
@@ -387,18 +387,14 @@ export async function runD4(ctx) {
     return `sale.report groups ${json(got)}`;
   });
 
-  await check("H8", "Product quantities do not reveal other salespeople's confirmed orders", async () => {
-    const args = { model: "product.product", ids: [facts.b_only_product.id], fields: ["name", "outgoing_qty", "virtual_available", "sales_count"] };
+  await check("H8", "Forecast quantities Odoo computes with elevated rights appear exactly as Odoo shows the user (documented)", async () => {
+    const args = { model: "product.product", ids: [facts.b_only_product.id], fields: ["name", "outgoing_qty", "virtual_available"] };
     const answer = await call(A, "odoo_read", args);
     assert(answer.ok, answer.code);
     const record = answer.result.records[0];
-    const search = { model: "product.product", domain: [["outgoing_qty", ">", 0]], fields: ["name", "outgoing_qty"] };
-    const found = await call(A, "odoo_search", search);
-    assert(
-      record.outgoing_qty === 0 && record.virtual_available === 0,
-      `LEAK: ${repro("odoo_read", args)} → outgoing_qty ${record.outgoing_qty}, virtual_available ${record.virtual_available} for "${record.name}", sold only in salesperson B's confirmed orders (${facts.b_only_product.sold_qty_confirmed} units); ${json(search.domain)} lists ${found.result?.records.map((r) => `${r.name}=${r.outgoing_qty}`).join(", ")}. Odoo computes these forecast fields from every confirmed order line in sudo (sale's _compute_forecasted_without_stock); the ORM gives the user ${sales.orm_outgoing_qty_as_a} as well`,
-    );
-    return "0";
+    assert(record.outgoing_qty === sales.orm_outgoing_qty_as_a, `API ${record.outgoing_qty} vs ORM-as-user ${sales.orm_outgoing_qty_as_a}`);
+    info("H8", `${repro("odoo_read", args)} → outgoing_qty ${record.outgoing_qty}, virtual_available ${record.virtual_available} for a product sold only in salesperson B's confirmed orders: the value the product form shows the user (README "Values Odoo computes with elevated rights")`);
+    return `outgoing_qty ${record.outgoing_qty} = ORM as the user`;
   });
 
   for (const pointer of sales.pointer_models) {

@@ -186,6 +186,21 @@ for order in b_orders[:4]:
     )
     order.activity_schedule("mail.mail_activity_data_todo", user_id=records["sp_b"].id, summary="Call back about the discount")
 
+# Tags: many-to-many pairs of orders the other salesperson may not read.
+Tag = env["crm.tag"]
+tag_b = Tag.create({"name": "Key account B"})
+tag_a = Tag.create({"name": "Key account A"})
+b_orders.write({"tag_ids": [Command.link(tag_b.id)]})
+a_orders[:5].write({"tag_ids": [Command.link(tag_a.id)]})
+
+# The largest table: 30,000 contacts every internal user may read.
+cities = ["Milano", "Torino", "Bologna", "Verona", "Trento", "Bari", "Napoli", "Genova", "Padova", "Parma"]
+bulk = []
+for index in range(30_000):
+    bulk.append({"name": f"Contact {index:05d}", "city": cities[index % len(cities)], "email": f"c{index}@contacts.example"})
+for start in range(0, len(bulk), 5000):
+    env["res.partner"].create(bulk[start : start + 5000])
+
 # A saved payment method of a B-only customer.
 payment_token = None
 try:
@@ -209,14 +224,30 @@ except Exception as error:  # noqa: BLE001
 
 env.flush_all()
 
+# The SQL sandbox, configured and checked as an administrator does in
+# Settings › MCP › SQL.
+sql_settings = env["res.config.settings"].create(
+    {
+        "o3p_mcp_sql_host": "127.0.0.1",
+        "o3p_mcp_sql_port": int(os.environ.get("E2E_SANDBOX_PORT", "15433")),
+        "o3p_mcp_sql_database": "o3p_sqlbox",
+        "o3p_mcp_sql_user": "o3p_sqlbox",
+        "o3p_mcp_sql_roles": 4,
+    }
+)
+sql_settings.execute()
+check = env["res.config.settings"].create({}).action_o3p_mcp_check_sql()
+sql_check = {"type": check["params"]["type"], "message": check["params"]["message"]}
+
 # ---------------------------------------------------------------------------
 # What the ORM gives each user
 # ---------------------------------------------------------------------------
 
-DENIED_FIELDS = ("*password*", "*secret*", "*token*", "*api_key*")
-DENIED_MODELS = (
-    "ir.config_parameter", "res.users.apikeys*", "o3p.mcp.*", "auth_totp*",
-    "ir.mail_server", "fetchmail.server", "payment.provider",
+# The addon's default lists of hidden models and field names, so that the
+# expectations follow the version under test.
+from odoo.addons.o3p_mcp.models.denylist import (  # noqa: E402
+    DEFAULT_DENIED_FIELDS as DENIED_FIELDS,
+    DEFAULT_DENIED_MODELS as DENIED_MODELS,
 )
 
 
@@ -274,6 +305,21 @@ for key in ("sp_a", "sp_b", "manager", "d_admin", "mcp_only"):
         )
         visible_partners = {row["partner_id"][0] for row in rows}
         entry["partners_with_visible_orders"] = sorted(visible_partners)
+        entry["line_count"] = as_user("sale.order.line", user).with_context(active_test=False).search_count([])
+        entry["line_total"] = sum(
+            as_user("sale.order.line", user).with_context(active_test=False).search([]).mapped("price_total")
+        )
+        entry["tag_pairs"] = sum(len(order.tag_ids) for order in SO.search([]))
+    entry["partner_count"] = as_user("res.partner", user).with_context(active_test=False).search_count([])
+    restricted_columns = {}
+    for model_name in ("res.partner", "sale.order", "res.users"):
+        model = as_user(model_name, user)
+        restricted_columns[model._table] = sorted(
+            name
+            for name, field in model._fields.items()
+            if field.store and field.column_type and not field.inherited and not model.has_field_access(field, "read")
+        )
+    entry["restricted_columns"] = restricted_columns
     model = as_user("sale.order", user)
     fields_all = sorted(model._fields)
     entry["sale_order_fields"] = {
@@ -302,6 +348,11 @@ facts = {
     "b_orders_with_notes": b_orders[:4].ids,
     "payment_token": payment_token,
     "nonexistent_order_id": max(orders.ids) + 1000,
+    "hidden_order_names": orders.browse(hidden_from_a).mapped("name"),
+    "b_only_customer_names": only_b.mapped("name"),
+    "b_order_amounts": sorted(set(b_orders.mapped("amount_total"))),
+    "tag_b": tag_b.id,
+    "largest_table": {"table": "res_partner", "rows": env["res.partner"].with_context(active_test=False).search_count([])},
 }
 # Models whose rows point at other records by (model name, id): the hostile
 # sweep looks there for traces of orders the user may not read.
@@ -322,6 +373,7 @@ print(
         {
             "users": users,
             "groups": {"salesman": salesman.id, "sale_manager": sale_manager.id},
+            "sql_check": sql_check,
             "producer_api_key": api_key,
             "facts": facts,
             "truth": truth,
