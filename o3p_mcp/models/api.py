@@ -23,6 +23,7 @@ from .denylist import (  # noqa: F401 - re-exported for callers of this module
 )
 from .oauth import (
     SCOPE_ODOO_READ,
+    SCOPE_ODOO_SQL,
     SCOPE_READ,
     find_by_secret,
     get_config,
@@ -113,29 +114,41 @@ ERRORS = {
     "unknown_model": (404, "Unknown model."),
     "result_too_large": (413, "The result is too large; ask for fewer records or fields."),
     "query_error": (422, "The query could not be run."),
+    "too_many_requests": (429, "Too many queries are running; try again shortly."),
+    "unavailable": (503, "SQL queries are not available."),
     "timeout": (504, "The query took too long."),
 }
 
 
 class ApiError(Exception):
-    """A data API error with a fixed code and message."""
+    """A data API error with a fixed code and message.
 
-    def __init__(self, code, message=None):
+    ``details`` is only used by the ``sql`` operation, for PostgreSQL's own
+    answer about the user's query (see o3p.mcp.api ``_op_sql``); ``tables``
+    is recorded in the call log, never returned.
+    """
+
+    def __init__(self, code, message=None, details=None, tables=None):
         super().__init__(code)
         self.code = code
         self.status, default = ERRORS[code]
         self.message = message or default
+        self.details = details
+        self.tables = tables
 
     def to_dict(self):
-        return {"error": {"code": self.code, "message": self.message}}
+        error = {"code": self.code, "message": self.message}
+        if self.details is not None:
+            error["details"] = self.details
+        return {"error": error}
 
 
 class O3pMcpApi(models.AbstractModel):
     _name = "o3p.mcp.api"
     _description = "MCP Data API"
 
-    # Operation -> (method, scope, parameters). The sql operation is not
-    # offered yet.
+    # Operation -> (method, scope, parameters). The sql operation lives in
+    # api_sql.py.
     _OPS = {
         "models": ("_op_models", SCOPE_ODOO_READ, {"query", "limit"}),
         "describe": ("_op_describe", SCOPE_ODOO_READ, {"model"}),
@@ -150,6 +163,7 @@ class O3pMcpApi(models.AbstractModel):
             SCOPE_ODOO_READ,
             {"model", "domain", "groupby", "aggregates", "order", "limit"},
         ),
+        "sql": ("_op_sql", SCOPE_ODOO_SQL, {"query", "limit"}),
     }
 
     # ------------------------------------------------------------------
@@ -225,7 +239,8 @@ class O3pMcpApi(models.AbstractModel):
     # ------------------------------------------------------------------
 
     def _run(self, op, params):
-        """Run ``op`` as the current user; return ``(result, model, rows)``.
+        """Run ``op`` as the current user; return ``(result, model, rows)``,
+        plus the tables read for ``sql``.
 
         The operation runs in a savepoint switched to a read-only transaction
         with a statement timeout, and the savepoint is always rolled back:

@@ -1,5 +1,5 @@
 {
-  "source": "o3p_mcp branch 20.0 at ad8c9a9 on Odoo 20.0-20261112 (generated from the code, not edited by hand)",
+  "source": "o3p_mcp branch 20.0 at 7023a99 on Odoo 20.0 (generated from the code, not edited by hand; data API and SQL parts by scripts/contract-20.sh)",
   "data_api_errors": [
     {
       "code": "invalid_params",
@@ -47,6 +47,16 @@
       "body": "{\"error\": {\"code\": \"query_error\", \"message\": \"The query could not be run.\"}}"
     },
     {
+      "code": "too_many_requests",
+      "status": 429,
+      "body": "{\"error\": {\"code\": \"too_many_requests\", \"message\": \"Too many queries are running; try again shortly.\"}}"
+    },
+    {
+      "code": "unavailable",
+      "status": 503,
+      "body": "{\"error\": {\"code\": \"unavailable\", \"message\": \"SQL queries are not available.\"}}"
+    },
+    {
       "code": "timeout",
       "status": 504,
       "body": "{\"error\": {\"code\": \"timeout\", \"message\": \"The query took too long.\"}}"
@@ -64,5 +74,116 @@
     "MSG_RANGE": "limit or offset is out of range."
   },
   "introspection_inactive": "{\"active\": false}",
-  "oauth_invalid_client": "{\"error\": \"invalid_client\", \"error_description\": \"Client authentication failed.\"}"
+  "oauth_invalid_client": "{\"error\": \"invalid_client\", \"error_description\": \"Client authentication failed.\"}",
+  "sql_messages": {
+    "MSG_NOT_CONFIGURED": "SQL queries are not configured on this server.",
+    "MSG_ONE_SELECT": "Only one SELECT statement is allowed (no INTO, FOR UPDATE or FOR SHARE).",
+    "MSG_SANDBOX_BUSY": "All SQL sandbox connections are busy; try again shortly.",
+    "MSG_SANDBOX_DOWN": "The SQL sandbox could not be reached.",
+    "MSG_TOO_MANY_BYTES": "The tables the query reads are too large; name fewer columns or tables.",
+    "MSG_TOO_MANY_ROWS": "Table %(table)s holds more rows than SQL may copy (%(max)s); use the search or group operations for it.",
+    "MSG_USER_BUSY": "You already have the maximum number of SQL queries running."
+  },
+  "sql_answers": {
+    "success": {
+      "params": {
+        "query": "SELECT 1 AS one, 'é'::text AS t, 1.5::numeric AS n, DATE '2026-11-14' AS d, TIMESTAMP '2026-11-14 10:20:30' AS ts, INTERVAL '90 minutes' AS i, '{\"a\": [1, 2]}'::jsonb AS j, '\\xdead'::bytea AS b, ARRAY[1, 2] AS a, NULL::int AS z",
+        "limit": 5
+      },
+      "setting": null,
+      "status": 200,
+      "body": "{\"result\": {\"columns\": [{\"name\": \"one\", \"type\": \"integer\"}, {\"name\": \"t\", \"type\": \"text\"}, {\"name\": \"n\", \"type\": \"numeric\"}, {\"name\": \"d\", \"type\": \"date\"}, {\"name\": \"ts\", \"type\": \"timestamp without time zone\"}, {\"name\": \"i\", \"type\": \"interval\"}, {\"name\": \"j\", \"type\": \"jsonb\"}, {\"name\": \"b\", \"type\": \"bytea\"}, {\"name\": \"a\", \"type\": \"integer[]\"}, {\"name\": \"z\", \"type\": \"integer\"}], \"rows\": [[1, \"é\", 1.5, \"2026-11-14\", \"2026-11-14T10:20:30\", 5400.0, {\"a\": [1, 2]}, \"\\\\xdead\", [1, 2], null]], \"truncated\": false, \"elapsedMs\": 0, \"tables\": []}}"
+    },
+    "truncated": {
+      "params": {
+        "query": "SELECT g FROM generate_series(1, 3) AS g",
+        "limit": 2
+      },
+      "setting": null,
+      "status": 200,
+      "body": "{\"result\": {\"columns\": [{\"name\": \"g\", \"type\": \"integer\"}], \"rows\": [[1], [2]], \"truncated\": true, \"elapsedMs\": 0, \"tables\": []}}"
+    },
+    "gate_refused": {
+      "params": {
+        "query": "SELECT 1; SELECT 2"
+      },
+      "setting": null,
+      "status": 422,
+      "body": "{\"error\": {\"code\": \"query_error\", \"message\": \"The query could not be run.\", \"details\": {\"sqlstate\": \"0A000\", \"position\": null, \"message\": \"Only one SELECT statement is allowed (no INTO, FOR UPDATE or FOR SHARE).\"}}}"
+    },
+    "syntax_error": {
+      "params": {
+        "query": "SELECT 1 FROM WHERE"
+      },
+      "setting": null,
+      "status": 422,
+      "body": "{\"error\": {\"code\": \"query_error\", \"message\": \"The query could not be run.\", \"details\": {\"sqlstate\": \"42601\", \"position\": 15, \"message\": \"syntax error at or near \\\"WHERE\\\"\"}}}"
+    },
+    "column_error": {
+      "params": {
+        "query": "SELECT nope"
+      },
+      "setting": null,
+      "status": 422,
+      "body": "{\"error\": {\"code\": \"query_error\", \"message\": \"The query could not be run.\", \"details\": {\"sqlstate\": \"42703\", \"position\": 8, \"message\": \"column \\\"nope\\\" does not exist\"}}}"
+    },
+    "missing_table": {
+      "params": {
+        "query": "SELECT * FROM no_such_table"
+      },
+      "setting": null,
+      "status": 422,
+      "body": "{\"error\": {\"code\": \"query_error\", \"message\": \"The query could not be run.\", \"details\": {\"sqlstate\": \"42P01\", \"position\": 15, \"message\": \"relation \\\"no_such_table\\\" does not exist\"}}}"
+    },
+    "invalid_params": {
+      "params": {
+        "query": "SELECT 1",
+        "limit": 0
+      },
+      "setting": null,
+      "status": 400,
+      "body": "{\"error\": {\"code\": \"invalid_params\", \"message\": \"The parameters are not valid.\"}}"
+    },
+    "row_cap": {
+      "params": {
+        "query": "SELECT count(*) FROM res_partner"
+      },
+      "setting": [
+        "o3p_mcp.sql_max_rows",
+        "1"
+      ],
+      "status": 413,
+      "body": "{\"error\": {\"code\": \"result_too_large\", \"message\": \"Table res_partner holds more rows than SQL may copy (1); use the search or group operations for it.\"}}"
+    },
+    "timeout": {
+      "params": {
+        "query": "SELECT pg_sleep(10)"
+      },
+      "setting": [
+        "o3p_mcp.api_timeout_seconds",
+        "1"
+      ],
+      "status": 504,
+      "body": "{\"error\": {\"code\": \"timeout\", \"message\": \"The query took too long.\"}}"
+    },
+    "unavailable": {
+      "params": {
+        "query": "SELECT 1"
+      },
+      "setting": [
+        "o3p_mcp.sql_host",
+        ""
+      ],
+      "status": 503,
+      "body": "{\"error\": {\"code\": \"unavailable\", \"message\": \"SQL queries are not configured on this server.\"}}"
+    },
+    "too_many_requests": {
+      "params": {
+        "query": "SELECT 1"
+      },
+      "setting": null,
+      "status": 429,
+      "body": "{\"error\": {\"code\": \"too_many_requests\", \"message\": \"You already have the maximum number of SQL queries running.\"}}"
+    }
+  }
 }

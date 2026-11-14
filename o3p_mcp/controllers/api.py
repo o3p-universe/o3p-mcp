@@ -93,10 +93,12 @@ class O3pMcpApiController(http.Controller):
                     request.env.context, lang=user.lang or "en_US", tz=user.tz or "UTC"
                 ),
             )
-            result, model, rows = request.env["o3p.mcp.api"]._run(
+            result, model, rows, *extra = request.env["o3p.mcp.api"]._run(
                 op, body.get("params", {})
             )
             audit.update(model=model, row_count=rows)
+            if extra and extra[0]:
+                audit["tables"] = ",".join(extra[0])
             payload = {"result": result}
             size = len(json.dumps(payload, ensure_ascii=False, default=json_default).encode())
             if size > request.env["o3p.mcp.api"]._max_response_bytes():
@@ -105,6 +107,8 @@ class O3pMcpApiController(http.Controller):
             return api_response(200, payload)
         except ApiError as error:
             audit.update(status=error.status, error=error.code, row_count=0)
+            if error.tables:
+                audit["tables"] = ",".join(error.tables)
             headers = []
             if error.status == 401:
                 headers.append(("WWW-Authenticate", 'Basic realm="o3p_mcp"'))

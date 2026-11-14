@@ -60,7 +60,7 @@ class TestContractParity(O3pMcpApiCase):
             "invalid_token": lambda: self.call("models", token="not-a-token"),
             "insufficient_scope": lambda: self.call("models", token=scoped["access_token"]),
             "access_denied": lambda: self.call("describe", {"model": "ir.cron"}),
-            "unknown_op": lambda: self.call("sql", {"query": "select 1"}),
+            "unknown_op": lambda: self.call("nope", {"query": "select 1"}),
             "unknown_model": lambda: self.call("describe", {"model": "no.such.model"}),
         }
         for code, send in cases.items():

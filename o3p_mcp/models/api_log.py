@@ -14,6 +14,7 @@ class O3pMcpApiLog(models.Model):
     )
     op = fields.Char(string="Operation", readonly=True)
     model = fields.Char(readonly=True)
+    tables = fields.Char(readonly=True, help="Tables an SQL query read, comma-separated.")
     status = fields.Integer(string="HTTP status", readonly=True)
     error = fields.Char(string="Error code", readonly=True)
     duration_ms = fields.Integer(string="Duration (ms)", readonly=True)

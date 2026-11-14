@@ -15,7 +15,7 @@ from odoo import api, models
 SCOPE_READ = "okf.read"
 SCOPE_WRITE = "okf.write"
 SCOPE_ODOO_READ = "odoo.read"
-# Reserved for permission-scoped SQL; no operation uses it yet.
+# Permission-scoped SQL (the data API's sql operation).
 SCOPE_ODOO_SQL = "odoo.sql"
 # Each scope and the group that grants it, in the order scopes are listed.
 SCOPE_GROUPS = {
