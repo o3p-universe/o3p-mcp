@@ -369,7 +369,8 @@ What a user cannot see or do:
 
 - records outside the user's rights, fields outside the user's groups,
   hidden models and fields (the data API's lists, plus `ir.attachment`,
-  `mail.message` and any model whose reads an addon customises), columns
+  `mail.message` and any model whose reads an addon customises, unless the
+  data API's review lists that customisation as hiding nothing), columns
   pointing to a hidden model, binary columns, non-stored fields and
   one-to-many fields (join the other table instead);
 - a table that is unknown, hidden or not readable: all three answer
