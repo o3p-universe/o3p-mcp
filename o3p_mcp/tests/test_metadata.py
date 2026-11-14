@@ -3,7 +3,7 @@ import json
 
 from odoo.tests import HttpCase, TransactionCase, tagged
 
-from ..models.oauth import is_allowed_redirect_uri
+from ..models.oauth import display_target, is_allowed_redirect_uri
 
 
 METADATA_URL = "/.well-known/oauth-authorization-server"
@@ -21,6 +21,9 @@ class TestRedirectUriPolicy(TransactionCase):
             "http://[::1]:8080/cb",
             "com.example.app:/oauth2redirect",
             "cursor://anysphere.cursor-retrieval/oauth/callback",
+            "https://bücher.example/callback",
+            "https://192.0.2.10/callback",
+            "https://[2001:db8::1]:8443/callback",
         ):
             with self.subTest(uri=uri):
                 self.assertTrue(is_allowed_redirect_uri(uri))
@@ -39,6 +42,17 @@ class TestRedirectUriPolicy(TransactionCase):
             "data:text/html,hello",
             "file:///etc/passwd",
             "ws://localhost/callback",
+            "https://evil.io\\.chatgpt.com/cb",
+            "https://evil.io\\@app.example.com/cb",
+            "https://app.example.com%2f.evil.io/cb",
+            "https://exa_mple.com/cb",
+            "https://-app.example.com/cb",
+            "https://app.example.com./cb",
+            "https://127.1/cb",
+            "https://0x7f.0.0.1/cb",
+            "https://@app.example.com/cb",
+            "cursor://user@anysphere.cursor-retrieval/cb",
+            "cursor://bad_host/cb",
             "/relative/callback",
             "",
             "https://app.example.com/" + "x" * 2000,
@@ -47,6 +61,19 @@ class TestRedirectUriPolicy(TransactionCase):
         ):
             with self.subTest(uri=uri):
                 self.assertFalse(is_allowed_redirect_uri(uri))
+
+
+    def test_display_target(self):
+        for uri, shown in (
+            ("https://bücher.example/cb", "xn--bcher-kva.example"),
+            ("https://APP.example.com:8443/cb", "app.example.com:8443"),
+            ("http://127.0.0.1:33418/cb", "127.0.0.1:33418"),
+            ("http://[::1]:8080/cb", "[::1]:8080"),
+            ("com.example.app:/oauth2redirect", "com.example.app:"),
+            ("cursor://anysphere.cursor-retrieval/cb", "cursor://anysphere.cursor-retrieval"),
+        ):
+            with self.subTest(uri=uri):
+                self.assertEqual(display_target(uri), shown)
 
 
 @tagged("post_install", "-at_install")
@@ -176,6 +203,8 @@ class TestMetadataAndRegistration(HttpCase):
             ({"redirect_uris": "https://app.example.com/cb"}, "invalid_redirect_uri"),
             ({"redirect_uris": ["http://app.example.com/cb"]}, "invalid_redirect_uri"),
             ({"redirect_uris": ["javascript:alert(1)"]}, "invalid_redirect_uri"),
+            # Review probe: a backslash makes the shown host differ from the real one.
+            ({"redirect_uris": ["https://evil.io\\.chatgpt.com/cb"]}, "invalid_redirect_uri"),
             (
                 {
                     "redirect_uris": ["https://app.example.com/cb"],

@@ -163,6 +163,18 @@ class TestAuthorize(O3pMcpHttpCase):
         self.assertEqual(response.status_code, 303)
         self.assertIn("code", location_of(response)[1])
 
+    def test_consent_shows_the_idna_host(self):
+        uri = "https://bücher.example/callback"
+        self.client.redirect_uris = [uri]
+        self.authenticate("o3p_mcp_editor", "o3p_mcp_editor")
+        page = self.get_consent(redirect_uri=uri)
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("Your answer is sent to <code>xn--bcher-kva.example</code>", page.text)
+        response = self.decide("approve", redirect_uri=uri)
+        self.assertTrue(
+            response.headers["Location"].startswith("https://xn--bcher-kva.example/callback?")
+        )
+
     def test_approve(self):
         self.authenticate("o3p_mcp_editor", "o3p_mcp_editor")
         response = self.decide("approve")

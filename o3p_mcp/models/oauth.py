@@ -1,10 +1,13 @@
 import base64
 import hashlib
 import hmac
+import ipaddress
 import re
 import secrets
 from datetime import timedelta
 from urllib.parse import urlsplit
+
+import idna
 
 from odoo import api, models
 
@@ -49,6 +52,8 @@ REJECTED_SCHEMES = frozenset(
     }
 )
 SCHEME_RE = re.compile(r"[a-z][a-z0-9+.\-]*")
+DNS_LABEL_RE = re.compile(r"(?!-)[a-z0-9-]{1,63}(?<!-)")
+MAX_HOSTNAME_LENGTH = 253
 
 
 def new_secret():
@@ -100,18 +105,48 @@ def find_by_secret(model, field, value):
     return empty
 
 
+def normalized_host(hostname):
+    """Return the ASCII form of a DNS name or IP literal, or None.
+
+    DNS names are converted with IDNA (UTS 46, as browsers do), so a
+    look-alike Unicode name shows as its ``xn--`` form. Anything that is not
+    a plain DNS name or IP address is refused, including a numeric last label
+    (an IPv4 address in another notation, such as ``127.1``).
+    """
+    if not hostname:
+        return None
+    try:
+        return str(ipaddress.ip_address(hostname))
+    except ValueError:
+        pass
+    try:
+        ascii_host = idna.encode(hostname, uts46=True).decode("ascii").lower()
+    except (idna.IDNAError, UnicodeError):
+        return None
+    labels = ascii_host.split(".")
+    if (
+        len(ascii_host) > MAX_HOSTNAME_LENGTH
+        or not all(DNS_LABEL_RE.fullmatch(label) for label in labels)
+        or labels[-1].isdigit()
+    ):
+        return None
+    return ascii_host
+
+
 def is_allowed_redirect_uri(uri):
     """Tell whether ``uri`` may be registered as a redirect URI.
 
     Allowed: ``https`` URLs, ``http`` URLs on a loopback host and private-use
-    schemes (RFC 8252). Fragments, user information, whitespace and the
-    schemes a browser handles itself are refused.
+    schemes (RFC 8252). Fragments, user information, backslashes,
+    whitespace, hosts that are not a DNS name or IP address, and the schemes
+    a browser handles itself are refused.
     """
     if (
         not isinstance(uri, str)
         or not uri
         or len(uri) > MAX_REDIRECT_URI_LENGTH
         or "#" in uri
+        or "\\" in uri
         or any(char.isspace() or not char.isprintable() for char in uri)
     ):
         return False
@@ -122,11 +157,30 @@ def is_allowed_redirect_uri(uri):
     except ValueError:
         return False
     scheme = parts.scheme.lower()
+    if parts.netloc and ("@" in parts.netloc or not normalized_host(hostname)):
+        return False
     if scheme in ("http", "https"):
-        if not hostname or parts.username is not None or parts.password is not None:
+        if not parts.netloc:
             return False
         return scheme == "https" or hostname in LOOPBACK_HOSTS
     return bool(SCHEME_RE.fullmatch(scheme)) and scheme not in REJECTED_SCHEMES
+
+
+def display_target(uri):
+    """Return where ``uri`` leads, as shown to the user.
+
+    ``https://bücher.example:8443/cb`` gives ``xn--bcher-kva.example:8443``;
+    a private-use URI gives its scheme (and host, if any).
+    """
+    parts = urlsplit(uri)
+    host = normalized_host(parts.hostname) if parts.netloc else None
+    if host and ":" in host:
+        host = f"[{host}]"
+    if host and parts.port:
+        host = f"{host}:{parts.port}"
+    if parts.scheme in ("http", "https"):
+        return host or ""
+    return f"{parts.scheme}://{host}" if host else f"{parts.scheme}:"
 
 
 def parse_scope(value):

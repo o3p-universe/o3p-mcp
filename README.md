@@ -58,8 +58,10 @@ not. None of the API endpoints creates a session.
 The body is a JSON object with at least `redirect_uris`. Each redirect URI
 must be an `https` URL, an `http` URL on a loopback host (`localhost`,
 `127.0.0.1`, `[::1]`) or a private-use scheme such as
-`com.example.app:/callback`; fragments, user information and schemes such as
-`javascript:`, `data:` or `file:` are refused. Redirect URIs are later
+`com.example.app:/callback`. Hosts must be DNS names or IP addresses;
+backslashes, fragments, user information, numeric host names such as
+`127.1` and schemes such as `javascript:`, `data:` or `file:` are refused.
+The same rules apply to redirect URIs edited by an administrator. Redirect URIs are later
 compared exactly, port included.
 
 `token_endpoint_auth_method` may be `none` (public client),
@@ -96,7 +98,8 @@ HTTP 429 with `Retry-After`.
   the client and redirect URI, before any other parameter.
 
 The consent page names the client, the user, the MCP server and the scopes,
-and shows where the answer is sent. It cannot be framed. Approving posts the
+and shows where the answer is sent: the redirect host in its ASCII (IDNA)
+form, so a look-alike Unicode name appears as `xn--…`. It cannot be framed. Approving posts the
 form back with Odoo's CSRF token and redirects to the client with `code`,
 `state` and `iss` (RFC 9207); denying redirects with `error=access_denied`.
 For clients created by an administrator, other request errors are

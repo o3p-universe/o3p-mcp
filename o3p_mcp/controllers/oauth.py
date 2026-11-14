@@ -16,6 +16,7 @@ from ..models.oauth import (
     TOKEN_PATH,
     AuthorizationError,
     OAuthError,
+    display_target,
     parse_scope,
 )
 
@@ -104,14 +105,6 @@ def client_redirect(uri, params):
     return request.redirect(with_query(uri, {**params, "iss": issuer}), local=False)
 
 
-def redirect_target(uri):
-    """Return where ``uri`` leads, as shown to the user."""
-    parts = urlsplit(uri)
-    if parts.scheme in ("http", "https"):
-        return parts.netloc
-    return f"{parts.scheme}:"
-
-
 def authorization_error_response(error):
     if not error.show:
         return client_redirect(
@@ -137,7 +130,7 @@ def authorization_error_response(error):
         {
             "message": error.description,
             "return_url": return_url,
-            "return_target": error.redirect_uri and redirect_target(error.redirect_uri),
+            "return_target": error.redirect_uri and display_target(error.redirect_uri),
         },
         status=403 if error.error == "access_denied" else 400,
         headers=PAGE_HEADERS,
@@ -301,7 +294,7 @@ class O3pMcpOauthController(http.Controller):
                 "self_registered": bool(client.registration_ip),
                 "user_name": request.env.user.name,
                 "resource": values["resource"],
-                "redirect_target": redirect_target(values["redirect_uri"]),
+                "redirect_target": display_target(values["redirect_uri"]),
                 "scopes": oauth._scope_descriptions(values["scopes"]),
                 "fields": fields,
             },

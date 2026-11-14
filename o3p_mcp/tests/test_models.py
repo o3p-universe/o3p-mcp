@@ -289,7 +289,13 @@ class TestClientAuthentication(O3pMcpCommon, TransactionCase):
 
     def test_redirect_uris_are_validated(self):
         Client = self.env["o3p.mcp.client"]
-        for uris in (["javascript:alert(1)"], ["http://app.example.com/cb"], "x"):
+        for uris in (
+            ["javascript:alert(1)"],
+            ["http://app.example.com/cb"],
+            ["https://evil.io\\.chatgpt.com/cb"],
+            ["https://user@app.example.com/cb"],
+            "x",
+        ):
             with self.subTest(uris=uris), self.assertRaises(ValidationError):
                 Client.create({"name": "Bad", "redirect_uris": uris})
         Client.create({"name": "Server", "kind": "resource_server"})

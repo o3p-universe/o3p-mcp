@@ -6,14 +6,14 @@
         "and introspects OAuth 2.1 access tokens whose scopes follow the user's "
         "MCP groups."
     ),
-    "version": "20.0.1.7.0",
+    "version": "20.0.1.8.0",
     "category": "Technical",
     "author": "O3P",
     "website": "https://github.com/o3p-universe/o3p-mcp",
     "license": "LGPL-3",
     "depends": ["base_setup", "web"],
     "external_dependencies": {
-        "python": ["requests"],
+        "python": ["idna", "requests"],
     },
     "data": [
         "security/o3p_mcp_security.xml",
