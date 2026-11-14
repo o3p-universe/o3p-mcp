@@ -92,6 +92,65 @@
                             </div>
                         </setting>
                     </block>
+                    <block title="SQL">
+                        <setting id="o3p_mcp_sql_sandbox"
+                                 string="SQL sandbox"
+                                 help="Separate PostgreSQL instance where SQL queries run, logged in as roles without privileges. Empty host: the sql operation is not available.">
+                            <div class="content-group">
+                                <div class="row">
+                                    <label for="o3p_mcp_sql_host" class="col-lg-4 o_light_label"/>
+                                    <field name="o3p_mcp_sql_host" placeholder="sql-sandbox.internal"/>
+                                </div>
+                                <div class="row">
+                                    <label for="o3p_mcp_sql_port" class="col-lg-4 o_light_label"/>
+                                    <field name="o3p_mcp_sql_port"/>
+                                </div>
+                                <div class="row">
+                                    <label for="o3p_mcp_sql_database" class="col-lg-4 o_light_label"/>
+                                    <field name="o3p_mcp_sql_database"/>
+                                </div>
+                                <div class="row">
+                                    <label for="o3p_mcp_sql_user" class="col-lg-4 o_light_label"/>
+                                    <field name="o3p_mcp_sql_user"/>
+                                </div>
+                                <div class="row">
+                                    <label for="o3p_mcp_sql_roles" class="col-lg-4 o_light_label"/>
+                                    <field name="o3p_mcp_sql_roles"/>
+                                </div>
+                                <div class="row">
+                                    <label for="o3p_mcp_sql_sslmode" class="col-lg-4 o_light_label"/>
+                                    <field name="o3p_mcp_sql_sslmode"/>
+                                </div>
+                                <div class="row">
+                                    <label for="o3p_mcp_sql_password_source" class="col-lg-4 o_light_label"/>
+                                    <field name="o3p_mcp_sql_password_source" readonly="1"/>
+                                </div>
+                                <button name="action_o3p_mcp_check_sql"
+                                        type="object"
+                                        string="Check SQL sandbox"
+                                        icon="oi-arrow-right"
+                                        class="btn-link"/>
+                            </div>
+                        </setting>
+                        <setting id="o3p_mcp_sql_limits"
+                                 string="SQL limits"
+                                 help="Queries per user at once, rows of one table and data copied per query. The time limit is the data API's.">
+                            <div class="content-group">
+                                <div class="row">
+                                    <label for="o3p_mcp_sql_user_concurrency" class="col-lg-6 o_light_label"/>
+                                    <field name="o3p_mcp_sql_user_concurrency"/>
+                                </div>
+                                <div class="row">
+                                    <label for="o3p_mcp_sql_max_rows" class="col-lg-6 o_light_label"/>
+                                    <field name="o3p_mcp_sql_max_rows"/>
+                                </div>
+                                <div class="row">
+                                    <label for="o3p_mcp_sql_max_copy_mb" class="col-lg-6 o_light_label"/>
+                                    <field name="o3p_mcp_sql_max_copy_mb"/>
+                                </div>
+                            </div>
+                        </setting>
+                    </block>
                     <block title="Tokens">
                         <setting id="o3p_mcp_access_token_minutes"
                                  string="Access tokens"

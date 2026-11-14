@@ -215,6 +215,49 @@ class TestSqlLimits(O3pMcpSqlCase):
 
 @tagged("post_install", "-at_install")
 class TestSqlSandboxSetup(O3pMcpSqlCase):
+    def test_settings_check_passes(self):
+        ok, lines = self.env["o3p.mcp.api"]._sql_check()
+        self.assertTrue(ok, lines)
+        settings = self.env["res.config.settings"].create({})
+        action = settings.action_o3p_mcp_check_sql()
+        self.assertEqual(action["params"]["type"], "success", action["params"]["message"])
+
+    def test_settings_check_reports_problems(self):
+        with patch.object(api_sql, "sql_password", return_value="wrong"):
+            ok, lines = self.env["o3p.mcp.api"]._sql_check()
+        self.assertFalse(ok)
+        self.assertIn("o3p_sqlbox_1 cannot log in", lines[0])
+        self.env["ir.config_parameter"].sudo().set_str("o3p_mcp.sql_host", "")
+        self.assertFalse(self.env["o3p.mcp.api"]._sql_check()[0])
+
+    def test_settings_round_trip_and_validation(self):
+        Settings = self.env["res.config.settings"]
+        values = Settings.default_get(list(Settings.fields_get()))
+        self.assertEqual(values["o3p_mcp_sql_host"], self.sandbox_host)
+        self.assertEqual(values["o3p_mcp_sql_roles"], 4)
+        self.assertIn("O3P_SQL_PASSWORD", Settings.create({}).o3p_mcp_sql_password_source)
+        Settings.create({"o3p_mcp_sql_roles": 3, "o3p_mcp_sql_max_copy_mb": 5}).execute()
+        settings = self.env["o3p.mcp.api"]._sql_settings()
+        self.assertEqual((settings["roles"], settings["max_copy_bytes"]), (3, 5_000_000))
+        for values in (
+            {"o3p_mcp_sql_host": "bad host;"},
+            {"o3p_mcp_sql_port": 0},
+            {"o3p_mcp_sql_user": "Bad-Name"},
+            {"o3p_mcp_sql_roles": 0},
+            {"o3p_mcp_sql_user_concurrency": 65},
+            {"o3p_mcp_sql_max_rows": 0},
+        ):
+            with self.subTest(values=values), self.assertRaises(Exception):
+                Settings.create(values).execute()
+
+    def test_password_never_stored(self):
+        self.env["res.config.settings"].create({}).execute()
+        self.env.flush_all()
+        self.env.cr.execute("SELECT key, value FROM ir_config_parameter WHERE key LIKE 'o3p_mcp.sql%%'")
+        stored = dict(self.env.cr.fetchall())
+        self.assertNotIn(api_sql.sql_password(), json.dumps(stored))
+        self.assertFalse([key for key in stored if "password" in key])
+
     def test_roles_cannot_see_or_signal_each_other(self):
         settings = self.env["o3p.mcp.api"]._sql_settings()
         Api = self.env["o3p.mcp.api"]

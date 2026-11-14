@@ -1,13 +1,30 @@
+import os
+import re
 from urllib.parse import urlsplit, urlunsplit
 
 import requests
 
 from odoo import api, fields, models
 from odoo.exceptions import UserError
+from odoo.tools import config
 
 from .api import DEFAULT_LOG_DAYS, DEFAULT_MAX_RESPONSE_BYTES, DEFAULT_TIMEOUT_SECONDS
 from .denylist import DEFAULT_DENIED_FIELDS, DEFAULT_DENIED_MODELS, patterns
 from .mcp_client import DEFAULT_REGISTRATION_LIMIT, MAX_REGISTRATION_LIMIT
+from .api_sql import (
+    DEFAULT_SQL_DATABASE,
+    DEFAULT_SQL_MAX_COPY_BYTES,
+    DEFAULT_SQL_MAX_ROWS,
+    DEFAULT_SQL_PORT,
+    DEFAULT_SQL_ROLES,
+    DEFAULT_SQL_SSLMODE,
+    DEFAULT_SQL_USER,
+    DEFAULT_SQL_USER_CONCURRENCY,
+    MAX_USER_SLOTS,
+    PASSWORD_CONFIG_KEY,
+    PASSWORD_ENV,
+    SSL_MODES,
+)
 from .oauth import (
     DEFAULT_ACCESS_TOKEN_MINUTES,
     DEFAULT_REFRESH_TOKEN_DAYS,
@@ -18,6 +35,8 @@ from .oauth import (
 
 
 HEALTH_TIMEOUT = 10
+SQL_NAME_RE = re.compile(r"[a-z_][a-z0-9_]{0,40}")
+SQL_HOST_RE = re.compile(r"[A-Za-z0-9._:\[\]/-]{1,253}")
 MAX_ACCESS_TOKEN_MINUTES = 24 * 60
 MAX_REFRESH_TOKEN_DAYS = 365
 
@@ -108,6 +127,41 @@ class ResConfigSettings(models.TransientModel):
         string="Keep call log (days)",
         default=DEFAULT_LOG_DAYS,
     )
+    o3p_mcp_sql_host = fields.Char(
+        string="Sandbox host",
+        help="Host name of the separate PostgreSQL instance that runs SQL queries. Empty disables SQL.",
+    )
+    o3p_mcp_sql_port = fields.Integer(string="Sandbox port", default=DEFAULT_SQL_PORT)
+    o3p_mcp_sql_database = fields.Char(string="Sandbox database", default=DEFAULT_SQL_DATABASE)
+    o3p_mcp_sql_user = fields.Char(
+        string="Sandbox roles",
+        default=DEFAULT_SQL_USER,
+        help="Role name prefix: the roles are <prefix>_1 … <prefix>_<count>.",
+    )
+    o3p_mcp_sql_roles = fields.Integer(
+        string="Sandbox role count",
+        default=DEFAULT_SQL_ROLES,
+        help="How many SQL queries may run at once, over all users.",
+    )
+    o3p_mcp_sql_sslmode = fields.Selection(
+        [(mode, mode) for mode in SSL_MODES], string="Sandbox SSL mode", default=DEFAULT_SQL_SSLMODE
+    )
+    o3p_mcp_sql_user_concurrency = fields.Integer(
+        string="SQL queries per user", default=DEFAULT_SQL_USER_CONCURRENCY
+    )
+    o3p_mcp_sql_max_rows = fields.Integer(
+        string="Rows per table",
+        default=DEFAULT_SQL_MAX_ROWS,
+        help="Largest number of rows of one table a query may read.",
+    )
+    o3p_mcp_sql_max_copy_mb = fields.Integer(
+        string="Data per query (MB)",
+        default=DEFAULT_SQL_MAX_COPY_BYTES // 1_000_000,
+        help="Largest amount of table data copied into the sandbox for one query.",
+    )
+    o3p_mcp_sql_password_source = fields.Char(
+        string="Sandbox password", compute="_compute_o3p_mcp_sql_password_source"
+    )
     o3p_mcp_metadata_url = fields.Char(
         string="Metadata URL",
         compute="_compute_o3p_mcp_urls",
@@ -129,6 +183,20 @@ class ResConfigSettings(models.TransientModel):
             settings.o3p_mcp_metadata_url = f"{issuer}{METADATA_PATH}"
             settings.o3p_mcp_introspection_url = f"{issuer}{INTROSPECT_PATH}"
             settings.o3p_mcp_resource_server_client_id = server.client_id
+
+    def _compute_o3p_mcp_sql_password_source(self):
+        if os.environ.get(PASSWORD_ENV):
+            source = self.env._("Set by the %(name)s environment variable", name=PASSWORD_ENV)
+        elif config.get(PASSWORD_CONFIG_KEY):
+            source = self.env._("Set by %(key)s in the Odoo configuration file", key=PASSWORD_CONFIG_KEY)
+        else:
+            source = self.env._(
+                "Missing: set the %(name)s environment variable or %(key)s in the Odoo configuration file",
+                name=PASSWORD_ENV,
+                key=PASSWORD_CONFIG_KEY,
+            )
+        for settings in self:
+            settings.o3p_mcp_sql_password_source = source
 
     @api.model
     def get_values(self):
@@ -160,6 +228,18 @@ class ResConfigSettings(models.TransientModel):
                 "o3p_mcp.api_timeout_seconds", DEFAULT_TIMEOUT_SECONDS
             ),
             o3p_mcp_api_log_days=params.get_int("o3p_mcp.api_log_days", DEFAULT_LOG_DAYS),
+        )
+        sql = self.env["o3p.mcp.api"]._sql_settings()
+        values.update(
+            o3p_mcp_sql_host=sql["host"],
+            o3p_mcp_sql_port=sql["port"],
+            o3p_mcp_sql_database=sql["database"],
+            o3p_mcp_sql_user=sql["user"],
+            o3p_mcp_sql_roles=sql["roles"],
+            o3p_mcp_sql_sslmode=sql["sslmode"],
+            o3p_mcp_sql_user_concurrency=sql["user_concurrency"],
+            o3p_mcp_sql_max_rows=sql["max_rows"],
+            o3p_mcp_sql_max_copy_mb=sql["max_copy_bytes"] // 1_000_000,
         )
         return values
 
@@ -211,6 +291,7 @@ class ResConfigSettings(models.TransientModel):
             )
         if not 1 <= self.o3p_mcp_api_log_days <= 3650:
             raise UserError(self.env._("The call log must be kept between 1 and 3650 days."))
+        self._check_o3p_mcp_sql_values()
         result = super().set_values()
         params = self.env["ir.config_parameter"].sudo()
         # The default lists are not stored, so that a later version's
@@ -229,7 +310,54 @@ class ResConfigSettings(models.TransientModel):
         params.set_int("o3p_mcp.access_token_minutes", self.o3p_mcp_access_token_minutes)
         params.set_int("o3p_mcp.refresh_token_days", self.o3p_mcp_refresh_token_days)
         params.set_int("o3p_mcp.registration_limit", self.o3p_mcp_registration_limit)
+        params.set_str("o3p_mcp.sql_host", (self.o3p_mcp_sql_host or "").strip())
+        params.set_int("o3p_mcp.sql_port", self.o3p_mcp_sql_port)
+        params.set_str("o3p_mcp.sql_database", self.o3p_mcp_sql_database.strip())
+        params.set_str("o3p_mcp.sql_user", self.o3p_mcp_sql_user.strip())
+        params.set_int("o3p_mcp.sql_roles", self.o3p_mcp_sql_roles)
+        params.set_str("o3p_mcp.sql_sslmode", self.o3p_mcp_sql_sslmode or DEFAULT_SQL_SSLMODE)
+        params.set_int("o3p_mcp.sql_user_concurrency", self.o3p_mcp_sql_user_concurrency)
+        params.set_int("o3p_mcp.sql_max_rows", self.o3p_mcp_sql_max_rows)
+        params.set_int("o3p_mcp.sql_max_copy_bytes", self.o3p_mcp_sql_max_copy_mb * 1_000_000)
         return result
+
+    def _check_o3p_mcp_sql_values(self):
+        _ = self.env._
+        host = (self.o3p_mcp_sql_host or "").strip()
+        if host and not SQL_HOST_RE.fullmatch(host):
+            raise UserError(_("The sandbox host must be a host name or an IP address."))
+        if not 1 <= self.o3p_mcp_sql_port <= 65535:
+            raise UserError(_("The sandbox port must be between 1 and 65535."))
+        for value, label in (
+            (self.o3p_mcp_sql_database, _("sandbox database")),
+            (self.o3p_mcp_sql_user, _("sandbox role prefix")),
+        ):
+            if not SQL_NAME_RE.fullmatch((value or "").strip()):
+                raise UserError(
+                    _("The %(label)s must be a lowercase PostgreSQL name (letters, digits, _).", label=label)
+                )
+        if not 1 <= self.o3p_mcp_sql_roles <= 100:
+            raise UserError(_("The sandbox role count must be between 1 and 100."))
+        if not 1 <= self.o3p_mcp_sql_user_concurrency <= MAX_USER_SLOTS:
+            raise UserError(
+                _("SQL queries per user must be between 1 and %(max)s.", max=MAX_USER_SLOTS)
+            )
+        if not 1 <= self.o3p_mcp_sql_max_rows <= 100_000_000:
+            raise UserError(_("Rows per table must be between 1 and 100000000."))
+        if not 1 <= self.o3p_mcp_sql_max_copy_mb <= 10_000:
+            raise UserError(_("Data per query must be between 1 and 10000 MB."))
+
+    def action_o3p_mcp_check_sql(self):
+        """Connect as every sandbox role and report what it may do."""
+        self.ensure_one()
+        self.env["o3p.mcp.client"].check_access("write")
+        ok, lines = self.env["o3p.mcp.api"].sudo()._sql_check()
+        return notification(
+            self.env._("SQL sandbox"),
+            "\n".join(lines),
+            "success" if ok else "danger",
+            sticky=not ok,
+        )
 
     def action_o3p_mcp_rotate_credentials(self):
         """Create or rotate the introspection credentials; show the secret once."""
