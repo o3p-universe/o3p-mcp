@@ -9,6 +9,7 @@ from odoo.tests import tagged
 
 from ..models import api_sql
 from ..models.api_sql import LOCK_SANDBOX_ROLE, LOCK_USER_SLOT, MAX_USER_SLOTS
+from ..models.denylist import DEFAULT_DENIED_MODELS, SQL_DENIED_MODELS, model_denied
 from .common import RESOURCE
 from .sql_common import FIELD_MARKER, HIDDEN_MARKER, O3pMcpSqlCase
 
@@ -360,9 +361,13 @@ class TestSqlVisibility(O3pMcpSqlCase):
                 for model, field in entries
             )
         }
-        for name in ("mail.followers", "payment.token"):
-            if name in self.env.registry:
-                tables.add(self.env[name]._table)
+        # Every installed model of the default lists, the SQL-only list included.
+        defaults = (*DEFAULT_DENIED_MODELS, *SQL_DENIED_MODELS)
+        for name in self.env.registry:
+            model = self.env[name]
+            if not model._abstract and not model._transient and model_denied(name, defaults):
+                tables.add(model._table)
+        self.assertIn("o3p_mcp_token", tables)
         self.assertIn("res_partner_res_partner_category_rel", tables)
         for table in sorted(tables):
             for user in ("admin", "multi"):
