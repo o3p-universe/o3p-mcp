@@ -69,3 +69,32 @@ def field_denied(field, field_patterns, model_patterns):
     ):
         return True
     return bool(field.relational and model_denied(field.comodel_name, model_patterns))
+
+
+# Methods that change what a read returns after the search. What a model
+# hides in them (calendar.event blanks private events) is still matched by
+# its domains, sorted by its order and counted by its groups, so such a model
+# is only filtered, sorted and grouped on ``id`` and on the fields it declares
+# public (``_get_public_fields``), unless it is reviewed below.
+READ_OVERRIDES = ("read", "_read", "fetch", "_fetch_query", "search_fetch", "_read_format")
+ORM_MODULE_PREFIX = "odoo.orm."
+# Models whose read override does not hide anything from the user (model:
+# what the override does), reviewed on a standard Odoo 18 and 20 install.
+READ_OVERRIDES_REVIEWED = {
+    "account.move": "read() only supplies the default fields",
+    "account.move.line": "read() supplies the default fields; search_fetch() computes the cumulated balance",
+    "crm.lead": "search_fetch() supports ordering on the user's next activity deadline",
+    "hr.employee": "delegates to hr.employee.public only for users who may not read hr.employee, "
+    "whom the data API refuses already",
+    "ir.actions.act_window": "read() fills in the empty-list help text",
+    "mrp.bom.line": "search_fetch() keeps exploded lines in hierarchy order",
+}
+
+
+def overrides_read(model_class):
+    """Tell whether an addon overrides how ``model_class`` reads records."""
+    for method in READ_OVERRIDES:
+        owner = next((klass for klass in model_class.__mro__ if method in vars(klass)), None)
+        if owner is not None and not owner.__module__.startswith(ORM_MODULE_PREFIX):
+            return True
+    return False
