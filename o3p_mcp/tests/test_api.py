@@ -589,3 +589,108 @@ class TestApiGroup(O3pMcpApiCase):
         ):
             with self.subTest(params=params):
                 self.assertInvalid(user="admin", **params)
+
+
+@tagged("post_install", "-at_install")
+class TestApiX2manyConditions(O3pMcpApiCase):
+    """Conditions on one2many and many2many fields apply the related rules.
+
+    Odoo does not apply the related model's record rules to the short forms
+    (``child_ids in [id]``, ``= id``, ``!= False``); the API rewrites them to
+    ``any`` / ``not any``. Here a hidden contact belongs to a visible company.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.child = cls.env["res.partner"].create(
+            {"name": "MCPT Hidden Child", "parent_id": cls.alpha.id}
+        )
+
+    def names(self, domain, user="restricted"):
+        result = self.result(
+            "search",
+            {"model": "res.partner", "domain": MCPT + domain, "fields": ["name"]},
+            user=user,
+        )
+        return sorted(row["name"] for row in result["records"])
+
+    def test_short_forms_equal_the_explicit_any_form(self):
+        child = self.child.id
+        for short, explicit in (
+            ([["child_ids", "in", [child]]], [["child_ids", "any", [["id", "in", [child]]]]]),
+            ([["child_ids", "in", child]], [["child_ids", "any", [["id", "in", [child]]]]]),
+            ([["child_ids", "=", child]], [["child_ids", "any", [["id", "=", child]]]]),
+            ([["child_ids", "!=", False]], [["child_ids", "any", []]]),
+            ([["child_ids", "=", False]], [["child_ids", "not any", []]]),
+            ([["child_ids", "not in", [child]]], [["child_ids", "not any", [["id", "in", [child]]]]]),
+            ([["child_ids", "!=", child]], [["child_ids", "not any", [["id", "=", child]]]]),
+            (
+                [["child_ids", "ilike", "Hidden Child"]],
+                [["child_ids", "any", [["display_name", "ilike", "Hidden Child"]]]],
+            ),
+            (
+                [["child_ids", "not ilike", "Hidden Child"]],
+                [["child_ids", "not any", [["display_name", "ilike", "Hidden Child"]]]],
+            ),
+            ([["child_ids.name", "ilike", "Hidden"]], [["child_ids", "any", [["name", "ilike", "Hidden"]]]]),
+            (
+                [["parent_id.child_ids", "in", [child]]],
+                [["parent_id", "any", [["child_ids", "any", [["id", "in", [child]]]]]]],
+            ),
+        ):
+            with self.subTest(domain=short):
+                self.assertEqual(self.names(short), self.names(explicit))
+                self.assertEqual(self.names(short, "admin"), self.names(explicit, "admin"))
+
+    def test_hidden_related_records_reveal_nothing(self):
+        child = self.child.id
+        for domain in (
+            [["child_ids", "in", [child]]],
+            [["child_ids", "=", child]],
+            [["child_ids", "!=", False]],
+            [["child_ids.color", ">=", 0]],
+        ):
+            with self.subTest(domain=domain):
+                self.assertEqual(self.names(domain), [])
+                self.assertEqual(self.names(domain, "admin"), ["MCPT Alpha"])
+        groups = self.result(
+            "group",
+            {
+                "model": "res.partner",
+                "domain": MCPT + [["child_ids", "in", [child]]],
+                "groupby": ["type"],
+                "aggregates": ["__count"],
+            },
+        )["groups"]
+        self.assertEqual(groups, [])
+
+    def test_forms_without_a_faithful_rewrite_are_refused(self):
+        for condition in (
+            ["child_ids", "child_of", [self.alpha.id]],
+            ["child_ids", "parent_of", [self.alpha.id]],
+            ["child_ids", "<", 5],
+            ["child_ids", "=?", False],
+            ["child_ids", "in", [False]],
+            ["child_ids", "in", ["x"]],
+            ["child_ids", "=", True],
+            ["child_ids", "=", "Hidden"],
+        ):
+            with self.subTest(condition=condition):
+                self.assertApiError(
+                    self.call("search", {"model": "res.partner", "domain": [condition], "fields": ["name"]}),
+                    "invalid_params",
+                )
+
+    def test_related_model_must_be_readable(self):
+        # Only Settings administrators may read res.users.log.
+        for domain in (
+            [["log_ids", "!=", False]],
+            [["log_ids", "=", 1]],
+            [["log_ids.create_date", ">", "2000-01-01"]],
+            [["log_ids", "any", []]],
+        ):
+            with self.subTest(domain=domain):
+                params = {"model": "res.users", "domain": domain, "fields": ["login"]}
+                self.assertApiError(self.call("search", params), "access_denied")
+                self.assertEqual(self.call("search", params, user="admin").status_code, 200)
