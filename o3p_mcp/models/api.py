@@ -601,9 +601,19 @@ class O3pMcpApi(models.AbstractModel):
         result = {
             "model": model._name,
             "name": self._model_labels([model._name]).get(model._name) or model._description,
+            "table": self._table_name(model),
             "fields": result_fields,
         }
         return result, model._name, len(result_fields)
+
+    def _table_name(self, model):
+        """Return the table or view that stores ``model``, or None.
+
+        Models computed from a query have a ``_table`` name but no such
+        relation in the database.
+        """
+        self.env.cr.execute("SELECT to_regclass(%s) IS NOT NULL", [f'"{model._table}"'])
+        return model._table if self.env.cr.fetchone()[0] else None
 
     def _op_search(self, params):
         model = self._model(params.get("model"))

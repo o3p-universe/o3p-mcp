@@ -177,8 +177,10 @@ class TestApiDescribe(O3pMcpApiCase):
 
     def test_describe_shape(self):
         result = self.describe("res.partner")
-        self.assertEqual(set(result), {"model", "name", "fields"})
+        self.assertEqual(list(result), ["model", "name", "table", "fields"])
         self.assertEqual(result["model"], "res.partner")
+        self.assertEqual(result["table"], "res_partner")
+        self.assertEqual(self.describe("res.partner.category")["table"], "res_partner_category")
         fields_by_name = {item["name"]: item for item in result["fields"]}
         self.assertEqual(fields_by_name["color"]["type"], "integer")
         self.assertEqual(fields_by_name["category_id"]["relation"], "res.partner.category")
@@ -189,6 +191,12 @@ class TestApiDescribe(O3pMcpApiCase):
                 {"name", "string", "type", "relation", "required", "readonly", "selection", "help"},
             )
             self.assertNotEqual(item["type"], "binary")
+
+    def test_table_is_null_without_a_relation(self):
+        # Models computed from a query have a _table name but no relation.
+        with patch.object(type(self.env["res.partner.category"]), "_table", "o3p_mcp_no_such_table"):
+            result = self.describe("res.partner.category")
+        self.assertIsNone(result["table"])
 
     def test_field_groups_are_respected(self):
         with self.protected_field("res.partner", "function"):
