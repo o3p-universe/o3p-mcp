@@ -142,7 +142,7 @@ class O3pMcpOauthController(http.Controller):
         cors="*",
         save_session=False,
     )
-    def metadata(self):
+    def metadata(self, **_params):
         return request.make_json_response(request.env["o3p.mcp.oauth"]._metadata())
 
     @http.route(
@@ -156,7 +156,7 @@ class O3pMcpOauthController(http.Controller):
         save_session=False,
         max_content_length=MAX_REGISTRATION_BYTES,
     )
-    def register(self):
+    def register(self, **_params):
         try:
             try:
                 metadata = request.get_json_data()

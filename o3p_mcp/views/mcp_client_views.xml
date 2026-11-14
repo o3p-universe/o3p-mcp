@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="mcp_client_view_list" model="ir.ui.view">
+        <field name="name">o3p.mcp.client.list</field>
+        <field name="model">o3p.mcp.client</field>
+        <field name="arch" type="xml">
+            <list string="MCP Clients" decoration-muted="not active">
+                <field name="name"/>
+                <field name="client_id"/>
+                <field name="kind" optional="show"/>
+                <field name="token_endpoint_auth_method" optional="show"/>
+                <field name="registration_ip" optional="hide"/>
+                <field name="last_used_at" optional="show"/>
+                <field name="create_date" string="Registered" optional="hide"/>
+                <field name="active" column_invisible="True"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="mcp_client_view_form" model="ir.ui.view">
+        <field name="name">o3p.mcp.client.form</field>
+        <field name="model">o3p.mcp.client</field>
+        <field name="arch" type="xml">
+            <form string="MCP Client">
+                <header>
+                    <button name="action_revoke_tokens"
+                            type="object"
+                            string="Revoke all tokens"
+                            confirm="Revoke every token issued to this client?"
+                            invisible="not id or kind != 'client'"/>
+                </header>
+                <sheet>
+                    <widget name="web_ribbon" title="Archived" bg_color="text-bg-danger" invisible="active"/>
+                    <div class="oe_title">
+                        <label for="name"/>
+                        <h1><field name="name"/></h1>
+                    </div>
+                    <group>
+                        <group>
+                            <field name="client_id"/>
+                            <field name="kind"/>
+                            <field name="token_endpoint_auth_method"/>
+                            <field name="active" invisible="1"/>
+                        </group>
+                        <group>
+                            <field name="registration_ip"/>
+                            <field name="create_date" string="Registered"/>
+                            <field name="last_used_at"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Redirect URIs" name="redirect_uris" invisible="kind != 'client'">
+                            <field name="redirect_uris_text" nolabel="1"
+                                   placeholder="https://client.example.com/callback"/>
+                        </page>
+                        <page string="Tokens" name="tokens" invisible="kind != 'client'">
+                            <field name="token_ids" readonly="1" nolabel="1">
+                                <list decoration-muted="revoked_at">
+                                    <field name="user_id"/>
+                                    <field name="scope"/>
+                                    <field name="state"/>
+                                    <field name="expires_at"/>
+                                    <field name="refresh_expires_at"/>
+                                    <field name="last_used_at"/>
+                                    <field name="revoked_at" optional="hide"/>
+                                </list>
+                            </field>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="mcp_client_view_search" model="ir.ui.view">
+        <field name="name">o3p.mcp.client.search</field>
+        <field name="model">o3p.mcp.client</field>
+        <field name="arch" type="xml">
+            <search string="MCP Clients">
+                <field name="name"/>
+                <field name="client_id"/>
+                <field name="registration_ip"/>
+                <filter name="mcp_clients" string="MCP clients" domain="[('kind', '=', 'client')]"/>
+                <filter name="resource_servers" string="Resource servers" domain="[('kind', '=', 'resource_server')]"/>
+                <separator/>
+                <filter name="self_registered" string="Self-registered" domain="[('registration_ip', '!=', False)]"/>
+                <filter name="never_used" string="Never used" domain="[('last_used_at', '=', False)]"/>
+                <separator/>
+                <filter name="archived" string="Archived" domain="[('active', '=', False)]"/>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_mcp_client" model="ir.actions.act_window">
+        <field name="name">MCP Clients</field>
+        <field name="res_model">o3p.mcp.client</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="mcp_client_view_search"/>
+    </record>
+
+    <menuitem id="menu_o3p_mcp_technical"
+              name="MCP"
+              parent="base.menu_custom"
+              groups="base.group_system"
+              sequence="90"/>
+
+    <menuitem id="menu_o3p_mcp_client"
+              name="Clients"
+              parent="menu_o3p_mcp_technical"
+              action="action_mcp_client"
+              groups="base.group_system"
+              sequence="10"/>
+</odoo>

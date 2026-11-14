@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+    <record id="config_access_token_minutes" model="ir.config_parameter">
+        <field name="key">o3p_mcp.access_token_minutes</field>
+        <field name="value">60</field>
+    </record>
+    <record id="config_refresh_token_days" model="ir.config_parameter">
+        <field name="key">o3p_mcp.refresh_token_days</field>
+        <field name="value">30</field>
+    </record>
+</odoo>

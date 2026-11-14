@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="res_config_settings_view_form" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.inherit.o3p.mcp</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="base_setup.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <app data-string="MCP"
+                     string="MCP"
+                     name="o3p_mcp"
+                     groups="base.group_system">
+                    <block title="MCP server">
+                        <setting id="o3p_mcp_resource_url"
+                                 string="MCP server URL"
+                                 help="Public URL of the MCP endpoint. Tokens are issued for this audience and introspection reports it as aud.">
+                            <field name="o3p_mcp_resource_url"
+                                   placeholder="https://mcp.example.com/mcp"/>
+                            <div class="mt-2">
+                                <button name="action_o3p_mcp_check_health"
+                                        type="object"
+                                        string="Check MCP server"
+                                        icon="oi-arrow-right"
+                                        class="btn-link"/>
+                            </div>
+                        </setting>
+                        <setting id="o3p_mcp_authorization_server"
+                                 string="Authorization server"
+                                 help="Odoo's own URLs, to configure the MCP server with.">
+                            <div class="content-group">
+                                <div class="row">
+                                    <label for="o3p_mcp_issuer" class="col-lg-4 o_light_label"/>
+                                    <field name="o3p_mcp_issuer" readonly="1"/>
+                                </div>
+                                <div class="row">
+                                    <label for="o3p_mcp_metadata_url" class="col-lg-4 o_light_label"/>
+                                    <field name="o3p_mcp_metadata_url" readonly="1"/>
+                                </div>
+                                <div class="row">
+                                    <label for="o3p_mcp_introspection_url" class="col-lg-4 o_light_label"/>
+                                    <field name="o3p_mcp_introspection_url" readonly="1"/>
+                                </div>
+                            </div>
+                        </setting>
+                        <setting id="o3p_mcp_resource_server_credentials"
+                                 string="Introspection credentials"
+                                 help="HTTP Basic credentials the MCP server uses to introspect tokens. The secret is shown once, when it is created.">
+                            <div class="content-group">
+                                <div class="row">
+                                    <label for="o3p_mcp_resource_server_client_id" class="col-lg-4 o_light_label"/>
+                                    <field name="o3p_mcp_resource_server_client_id" readonly="1"
+                                           placeholder="Not created yet"/>
+                                </div>
+                                <button name="action_o3p_mcp_rotate_credentials"
+                                        type="object"
+                                        string="Create or rotate credentials"
+                                        confirm="A new secret replaces the current one, which stops working at once. Continue?"
+                                        class="btn-secondary mt-2"/>
+                            </div>
+                        </setting>
+                    </block>
+                    <block title="Tokens">
+                        <setting id="o3p_mcp_access_token_minutes"
+                                 string="Access tokens"
+                                 help="Lifetime of an access token, in minutes (1 to 1440).">
+                            <field name="o3p_mcp_access_token_minutes"/>
+                        </setting>
+                        <setting id="o3p_mcp_refresh_token_days"
+                                 string="Refresh tokens"
+                                 help="Lifetime of a refresh token, in days (1 to 365), counted from each refresh.">
+                            <field name="o3p_mcp_refresh_token_days"/>
+                        </setting>
+                        <setting id="o3p_mcp_management"
+                                 string="Clients and tokens"
+                                 help="Registered MCP clients and the tokens issued to them.">
+                            <div class="mt-2">
+                                <button name="o3p_mcp.action_mcp_client"
+                                        type="action"
+                                        string="Clients"
+                                        icon="oi-arrow-right"
+                                        class="btn-link"/>
+                                <button name="o3p_mcp.action_mcp_token"
+                                        type="action"
+                                        string="Tokens"
+                                        icon="oi-arrow-right"
+                                        class="btn-link"/>
+                            </div>
+                        </setting>
+                    </block>
+                </app>
+            </xpath>
+        </field>
+    </record>
+</odoo>

@@ -218,6 +218,11 @@ class O3pMcpToken(models.Model):
                     token._revoke_family()
                 return
 
+    def action_revoke(self):
+        self.check_access("write")
+        self._revoke_family()
+        return True
+
     # ------------------------------------------------------------------
     # Introspection
     # ------------------------------------------------------------------

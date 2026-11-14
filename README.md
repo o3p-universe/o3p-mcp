@@ -154,10 +154,81 @@ either token revokes every token of the same authorization. Unknown tokens
 and tokens of other clients are ignored; the answer is always an empty
 HTTP 200 once the client is authenticated.
 
+## Settings
+
+**Settings › MCP** (administrators only), stored as `ir.config_parameter`
+values under `o3p_mcp.*`:
+
+| Setting | Parameter | Default |
+|---|---|---|
+| MCP server URL: the public MCP endpoint, the only resource and token audience | `o3p_mcp.resource_url` | empty |
+| Access token lifetime, 1 to 1440 minutes | `o3p_mcp.access_token_minutes` | 60 |
+| Refresh token lifetime, 1 to 365 days, counted from each refresh | `o3p_mcp.refresh_token_days` | 30 |
+
+The section also shows the issuer, the metadata URL and the introspection
+URL, and offers two buttons:
+
+- **Create or rotate credentials** creates the resource-server client the MCP
+  server introspects with, or gives it a new secret. The client ID and secret
+  appear once, in a notification; the previous secret stops working at once.
+- **Check MCP server** calls the `/health` URL next to the MCP endpoint
+  (`https://mcp.example.com/mcp` → `https://mcp.example.com/health`) and
+  reports the HTTP status.
+
+## Management
+
+**Settings › Technical › MCP** (administrators only):
+
+- **Clients**: registered MCP clients and the resource-server client, with
+  their redirect URIs (one per line, same rules as registration),
+  authentication method, registration address and last use. Archiving a
+  client deactivates its tokens; **Revoke all tokens** revokes them.
+- **Tokens**: issued tokens with user, client, scope, state (active,
+  rotated, expired, revoked) and times. **Revoke**, on a token or on a
+  selection, revokes every token of the same authorization.
+
+Tokens do not depend on the user's Odoo session: logging out or changing the
+password leaves them valid. Removing the user's MCP groups or archiving the
+user takes effect at the next introspection; revoking tokens takes effect
+at once in Odoo (the MCP server may cache an answer for up to a minute).
+
+## Connecting an MCP client
+
+1. Install the addon and give users the **MCP / User** or **MCP / Editor**
+   group.
+2. In **Settings › MCP**, enter the MCP server URL and create the
+   introspection credentials.
+3. Configure the MCP server with Odoo as its authorization server: the
+   issuer shown in the settings, the introspection URL, the introspection
+   client ID and secret, and a public URL equal to the MCP server URL. With
+   okf-mcp:
+
+   ```sh
+   OKF_INTROSPECTION_CLIENT_ID=c_… OKF_INTROSPECTION_CLIENT_SECRET=… \
+   okf mcp --http --public-url https://mcp.example.com/mcp \
+     --authorization-server https://odoo.example.com \
+     --auth introspect:https://odoo.example.com/o3p_mcp/oauth/introspect
+   ```
+
+4. Add the MCP server URL to the MCP client. The client reads the server's
+   protected-resource metadata, discovers Odoo, registers itself, opens the
+   Odoo sign-in page and asks the user for consent.
+
+## Deployment notes
+
+- The issuer is `web.base.url`. Behind a reverse proxy, run Odoo with
+  `proxy_mode` so that `web.base.url` is the public URL and the registration
+  limit counts the clients' addresses rather than the proxy's.
+- The metadata, registration, token, introspection and revocation endpoints
+  run without a session, so Odoo must pick the database from the request
+  alone: serve a single database or set `dbfilter` so the host name selects
+  it.
+
 ## Installation
 
 Copy the `o3p_mcp` folder into an addons path and install **o3p - mcp**, or use
-the O3P installer with `o3p-mcp.o3p.json`.
+the O3P installer with `o3p-mcp.o3p.json`. The addon depends on `base_setup`
+and `web` and uses the Python `requests` package.
 
 ## Tests
 

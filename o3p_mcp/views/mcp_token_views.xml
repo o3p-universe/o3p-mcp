@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="mcp_token_view_list" model="ir.ui.view">
+        <field name="name">o3p.mcp.token.list</field>
+        <field name="model">o3p.mcp.token</field>
+        <field name="arch" type="xml">
+            <list string="MCP Tokens" create="0" edit="0"
+                  decoration-muted="state in ('expired', 'revoked')"
+                  decoration-danger="state == 'revoked'">
+                <field name="user_id"/>
+                <field name="client_id"/>
+                <field name="scope"/>
+                <field name="state"/>
+                <field name="create_date" string="Issued" optional="show"/>
+                <field name="expires_at" optional="show"/>
+                <field name="refresh_expires_at" optional="hide"/>
+                <field name="last_used_at" optional="show"/>
+                <field name="revoked_at" optional="hide"/>
+                <field name="family" optional="hide"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="mcp_token_view_form" model="ir.ui.view">
+        <field name="name">o3p.mcp.token.form</field>
+        <field name="model">o3p.mcp.token</field>
+        <field name="arch" type="xml">
+            <form string="MCP Token" create="0" edit="0">
+                <header>
+                    <button name="action_revoke"
+                            type="object"
+                            string="Revoke"
+                            confirm="Revoke this token and every token of the same authorization?"
+                            invisible="revoked_at"/>
+                    <field name="state" widget="statusbar"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="user_id"/>
+                            <field name="client_id"/>
+                            <field name="scope"/>
+                            <field name="resource"/>
+                            <field name="family"/>
+                        </group>
+                        <group>
+                            <field name="create_date" string="Issued"/>
+                            <field name="expires_at"/>
+                            <field name="refresh_expires_at"/>
+                            <field name="rotated_at"/>
+                            <field name="revoked_at"/>
+                            <field name="last_used_at"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="mcp_token_view_search" model="ir.ui.view">
+        <field name="name">o3p.mcp.token.search</field>
+        <field name="model">o3p.mcp.token</field>
+        <field name="arch" type="xml">
+            <search string="MCP Tokens">
+                <field name="user_id"/>
+                <field name="client_id"/>
+                <field name="family"/>
+                <filter name="not_revoked" string="Not revoked" domain="[('revoked_at', '=', False)]"/>
+                <filter name="revoked" string="Revoked" domain="[('revoked_at', '!=', False)]"/>
+                <separator/>
+                <filter name="group_user" string="User" context="{'group_by': 'user_id'}"/>
+                <filter name="group_client" string="Client" context="{'group_by': 'client_id'}"/>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_mcp_token" model="ir.actions.act_window">
+        <field name="name">MCP Tokens</field>
+        <field name="res_model">o3p.mcp.token</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="mcp_token_view_search"/>
+        <field name="context">{'search_default_not_revoked': 1}</field>
+    </record>
+
+    <record id="action_mcp_token_revoke" model="ir.actions.server">
+        <field name="name">Revoke</field>
+        <field name="model_id" ref="model_o3p_mcp_token"/>
+        <field name="binding_model_id" ref="model_o3p_mcp_token"/>
+        <field name="binding_view_types">list,form</field>
+        <field name="group_ids" eval="[Command.link(ref('base.group_system'))]"/>
+        <field name="state">code</field>
+        <field name="code">records.action_revoke()</field>
+    </record>
+
+    <menuitem id="menu_o3p_mcp_token"
+              name="Tokens"
+              parent="menu_o3p_mcp_technical"
+              action="action_mcp_token"
+              groups="base.group_system"
+              sequence="20"/>
+</odoo>

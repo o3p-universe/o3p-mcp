@@ -63,6 +63,7 @@ class O3pMcpClient(models.Model):
     redirect_uris_text = fields.Text(
         string="Redirect URIs (one per line)",
         compute="_compute_redirect_uris_text",
+        inverse="_inverse_redirect_uris_text",
     )
     token_endpoint_auth_method = fields.Selection(
         AUTH_METHODS,
@@ -92,7 +93,7 @@ class O3pMcpClient(models.Model):
                 "\n".join(uris) if isinstance(uris, list) else False
             )
 
-    @api.constrains("redirect_uris", "kind")
+    @api.constrains("redirect_uris")
     def _check_redirect_uris(self):
         for client in self:
             uris = client.redirect_uris or []
@@ -105,10 +106,39 @@ class O3pMcpClient(models.Model):
                         "loopback host or private-use schemes, without a fragment."
                     )
                 )
-            if client.kind == "client" and not uris and client.active:
-                raise ValidationError(
-                    self.env._("An MCP client needs at least one redirect URI.")
-                )
+
+    def _inverse_redirect_uris_text(self):
+        for client in self:
+            lines = (client.redirect_uris_text or "").splitlines()
+            client.redirect_uris = [line.strip() for line in lines if line.strip()]
+
+    def action_revoke_tokens(self):
+        self.check_access("write")
+        self.token_ids._revoke_family()
+        return True
+
+    @api.model
+    def _resource_server(self):
+        return self.search([("kind", "=", "resource_server")], order="id", limit=1)
+
+    @api.model
+    def _rotate_resource_server_secret(self):
+        """Create or reuse the resource-server client and give it a new secret.
+
+        Returns ``(client, secret)``; the previous secret stops working.
+        """
+        Client = self.sudo().with_context(active_test=False)
+        server = Client._resource_server()
+        if not server:
+            server = Client.create(
+                {
+                    "name": self.env._("MCP server"),
+                    "kind": "resource_server",
+                    "token_endpoint_auth_method": "client_secret_basic",
+                }
+            )
+        server.write({"active": True, "token_endpoint_auth_method": "client_secret_basic"})
+        return server, server._set_new_secret()
 
     def _set_new_secret(self):
         """Store a new client secret and return it; it is never readable again."""
