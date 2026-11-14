@@ -117,9 +117,11 @@ class TestApiAuthentication(O3pMcpApiCase):
         self.assertApiError(self.call("models"), "invalid_token")
 
     def test_unknown_operations(self):
-        for op in ("sql", "write", "unlink", "nope"):
+        for op in ("write", "unlink", "nope", "SQL"):
             with self.subTest(op=op):
                 self.assertApiError(self.call(op, {"query": "select 1"}), "unknown_op")
+        # The tokens here lack odoo.sql.
+        self.assertApiError(self.call("sql", {"query": "select 1"}), "insufficient_scope")
         response = self.url_open(API_URL + "models")
         self.assertEqual(response.status_code, 405)
         response = self.url_open(
