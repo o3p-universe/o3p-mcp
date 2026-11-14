@@ -747,15 +747,25 @@ class O3pMcpApi(models.AbstractModel):
             list(readable),
             attributes=["string", "type", "relation", "required", "readonly", "selection", "help"],
         )
+        filterable = self._filterable_fields(model)
         result_fields = []
         for name in sorted(descriptions):
             description = descriptions[name]
+            field = readable[name]
+            usable = name in filterable
             item = {
                 "name": name,
                 "string": description.get("string") or name,
                 "type": description.get("type"),
                 "required": bool(description.get("required")),
                 "readonly": bool(description.get("readonly")),
+                # What the API accepts for this field: a database column of
+                # its own (one2many and many2many have none), conditions,
+                # order and groupby.
+                "stored": bool(field.store and field.column_type),
+                "searchable": usable and bool(field._description_searchable),
+                "sortable": usable and bool(field._description_sortable(model.env)),
+                "groupable": usable and bool(field._description_groupable(model.env)),
             }
             if description.get("relation"):
                 item["relation"] = description["relation"]

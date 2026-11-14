@@ -188,10 +188,30 @@ class TestApiDescribe(O3pMcpApiCase):
         self.assertIn("selection", fields_by_name["type"])
         for item in result["fields"]:
             self.assertLessEqual(
+                {"name", "string", "type", "required", "readonly", "stored", "searchable", "sortable", "groupable"},
                 set(item),
-                {"name", "string", "type", "relation", "required", "readonly", "selection", "help"},
+            )
+            self.assertLessEqual(
+                set(item),
+                {"name", "string", "type", "relation", "required", "readonly", "stored", "searchable",
+                 "sortable", "groupable", "selection", "help"},
             )
             self.assertNotEqual(item["type"], "binary")
+        flags = {
+            name: (fields_by_name[name]["stored"], fields_by_name[name]["searchable"],
+                   fields_by_name[name]["sortable"], fields_by_name[name]["groupable"])
+            for name in ("name", "color", "category_id", "child_ids", "parent_id", "display_name",
+                         "active_lang_count")
+        }
+        self.assertEqual(flags, {
+            "name": (True, True, True, True),
+            "color": (True, True, True, True),
+            "category_id": (False, True, False, True),
+            "child_ids": (False, True, False, False),
+            "parent_id": (True, True, True, True),
+            "display_name": (False, True, False, False),
+            "active_lang_count": (False, False, False, False),
+        })
 
     def test_table_is_null_without_a_relation(self):
         # Models computed from a query have a _table name but no relation.
