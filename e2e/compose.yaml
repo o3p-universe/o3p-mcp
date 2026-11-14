@@ -1,0 +1,89 @@
+# End-to-end stack: PostgreSQL 17, Odoo 20 with o3p_mcp, and nginx as the
+# reverse proxy in front of Odoo (proxy_mode needs X-Forwarded-* headers).
+#
+# Every service shares the host network so that Odoo, okf-mcp (a host
+# process) and the test client all reach each other under the same loopback
+# URLs: the issuer and the MCP URL must be https or http on localhost, and
+# Odoo's "Check MCP server" button calls okf-mcp from inside the container.
+#
+#   proxy  127.0.0.1:${E2E_ODOO_PORT:-18069}   public Odoo URL (the issuer)
+#   odoo   127.0.0.1:${E2E_ODOO_INTERNAL_PORT:-18070}
+#   db     127.0.0.1:${E2E_DB_PORT:-15432}
+name: o3p-e2e
+
+services:
+  db:
+    image: postgres:17
+    network_mode: host
+    environment:
+      POSTGRES_USER: odoo
+      POSTGRES_PASSWORD: odoo
+      POSTGRES_DB: postgres
+    command:
+      - postgres
+      - -c
+      - listen_addresses=127.0.0.1
+      - -c
+      - port=${E2E_DB_PORT:-15432}
+      - -c
+      - fsync=off
+      - -c
+      - shared_buffers=64MB
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p ${E2E_DB_PORT:-15432} -U odoo -d postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  odoo:
+    image: odoo:20.0
+    network_mode: host
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      HOST: 127.0.0.1
+      PORT: ${E2E_DB_PORT:-15432}
+      USER: odoo
+      PASSWORD: odoo
+      PYTHONDONTWRITEBYTECODE: "1"
+    command:
+      - odoo
+      - --database=o3p_e2e
+      - --db-filter=^o3p_e2e$$
+      - --no-database-list
+      - --proxy-mode
+      - --workers=0
+      - --max-cron-threads=0
+      - --http-interface=127.0.0.1
+      - --http-port=${E2E_ODOO_INTERNAL_PORT:-18070}
+      - --log-level=warn
+      - --log-handler=werkzeug:WARNING
+    volumes:
+      - ../o3p_mcp:/mnt/extra-addons/o3p_mcp:ro
+      - ./setup.py:/mnt/e2e/setup.py:ro
+    # Read the bind mounts without relabelling the host files (SELinux hosts).
+    security_opt:
+      - label:disable
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:${E2E_ODOO_INTERNAL_PORT:-18070}/web/health', timeout=3)\""]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  proxy:
+    image: nginx:1.27.5-alpine
+    network_mode: host
+    depends_on:
+      odoo:
+        condition: service_healthy
+    environment:
+      E2E_ODOO_PORT: ${E2E_ODOO_PORT:-18069}
+      E2E_ODOO_INTERNAL_PORT: ${E2E_ODOO_INTERNAL_PORT:-18070}
+      NGINX_ENVSUBST_FILTER: ^E2E_
+    volumes:
+      - ./nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+    security_opt:
+      - label:disable

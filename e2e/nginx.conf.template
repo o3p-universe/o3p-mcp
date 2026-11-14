@@ -1,0 +1,21 @@
+# Reverse proxy in front of Odoo, as the o3p_mcp README requires for
+# proxy_mode: the client address, host and scheme reach Odoo through
+# X-Forwarded-*. X-Forwarded-For is overwritten, never appended, so a client
+# cannot choose the address the registration limit counts.
+server {
+    listen 127.0.0.1:${E2E_ODOO_PORT};
+    server_name localhost;
+    client_max_body_size 8m;
+
+    location / {
+        proxy_pass http://127.0.0.1:${E2E_ODOO_INTERNAL_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Host $http_host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_redirect off;
+        proxy_read_timeout 120s;
+    }
+}
