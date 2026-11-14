@@ -5,7 +5,7 @@ the field on the denylist) or reviewed below with the reason it may be read.
 The same holds for models that point at other records by model name and id
 and that internal users may read. Entries for modules that are not installed
 are kept: they document the review of a standard install (sale, purchase,
-stock, account, crm, hr, project, website_sale, mrp).
+stock, account, crm, hr, project, website_sale, mrp) on Odoo 18 and 20.
 """
 
 import fnmatch
@@ -33,6 +33,9 @@ REVIEWED_FIELDS = {
     ("account.analytic.distribution.model", "account_prefix"): "account code prefix, accounting configuration",
     ("account.analytic.line", "ref"): "business reference of an analytic entry",
     ("account.bank.statement", "reference"): "business reference of a bank statement",
+    ("account.group", "code_prefix_start"): "account code range of an account group (Odoo 18)",
+    ("account.group", "code_prefix_end"): "account code range of an account group (Odoo 18)",
+    ("account.reconcile.model.partner.mapping", "payment_ref_regex"): "a matching rule, reconciliation configuration",
     ("account.bank.statement.line", "payment_ref"): "payment label of a statement line, shown in accounting",
     ("account.bank.statement.line", "account_number"): "counterpart bank account of a statement line, shown in accounting",
     ("account.move", "sequence_prefix"): "prefix of the entry number",
@@ -58,6 +61,8 @@ REVIEWED_FIELDS = {
     ("res.company", "bank_account_code_prefix"): "account code prefix, accounting configuration",
     ("res.company", "cash_account_code_prefix"): "account code prefix, accounting configuration",
     ("res.company", "transfer_account_code_prefix"): "account code prefix, accounting configuration",
+    ("res.users.settings", "push_to_talk_key"): "the user's push-to-talk keyboard shortcut",
+    ("stock.move.line", "reference"): "business reference of a stock move line",
     ("res.partner", "ref"): "the contact's internal reference, shown on the contact form",
     ("res.partner.bank", "acc_number"): "bank account number, printed on invoices and shown on the contact to every employee",
     ("res.partner.bank", "sanitized_acc_number"): "the same number without spaces",
@@ -111,6 +116,7 @@ class TestDenylistReview(TransactionCase):
             "mail.tracking.value",
             "mail.push.device",
             "rating.rating",
+            "snailmail.letter",
             "bus.bus",
             "bus.presence",
         ):
