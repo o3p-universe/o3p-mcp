@@ -160,6 +160,53 @@ class ApiError(Exception):
         return {"error": error}
 
 
+# ``details`` of a validation error: why, as a fixed reason and hint, and
+# where, as the field path or parameter name the client sent (schema names
+# only, never record data or Odoo's exception text).
+REASONS = {
+    "unknown_param": "Remove the parameters this operation does not take.",
+    "bad_value": "Check the type and the range of this parameter.",
+    "bad_domain": "A domain is a list of [field, operator, value] conditions and the prefix operators &, | and !.",
+    "too_deep": "Paths follow at most 4 fields and sub-domains nest at most 4 levels.",
+    "unknown_field": "Call describe for the model's field names.",
+    "not_readable": "The field is hidden or the user may not read it; describe lists the fields the user may use.",
+    "not_filterable": "This model hides data when it is read: filter, sort and group only on id and its public fields.",
+    "not_searchable": "The field is computed without a search method, so Odoo cannot filter on it; filter on fields describe marks searchable.",
+    "not_sortable": "Sort on fields describe marks sortable.",
+    "not_groupable": "Group on fields describe marks groupable.",
+    "not_relational": "Only relational fields can be followed with a dot or with any / not any.",
+    "bypass_relation": "This relation ignores the related model's access rules: search the related model first, then filter on its record ids.",
+    "no_relation_access": "The user may not read the model this relation points to.",
+    "no_model_access": "The user may not read this model.",
+    "bad_operator": "Use =, !=, >, >=, <, <=, =?, in, not in, like, not like, ilike, not ilike, =like, =ilike, any or not any (child_of and parent_of are not available); on relations compare record ids, or match names with =, in, like or ilike.",
+    "bad_order": "Use field, field asc or field desc items separated by commas.",
+    "bad_aggregate": "Use __count, field:sum|avg|min|max on numeric fields, or field:count|count_distinct on stored fields.",
+    "granularity_required": "Append :day, :week, :month, :quarter or :year to a date field (or :hour to a datetime field).",
+    "bad_granularity": "Only date and datetime fields take a granularity: day, week, month, quarter or year, and hour for datetimes.",
+}
+# Hints that replace no_model_access for some models.
+MODEL_HINTS = {
+    "hr.employee": "The user may not read hr.employee: use hr.employee.public, which every employee may read.",
+}
+SAFE_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.:]{0,127}")
+
+
+def invalid(reason, field=None, *, message=None, model=None, code="invalid_params"):
+    """Return an ApiError whose details say why (reason, hint) and where.
+
+    ``field`` is echoed only when it looks like a field path or a parameter
+    name; ``model`` only when it is a model name.
+    """
+    details = {}
+    if isinstance(field, str) and SAFE_NAME_RE.fullmatch(field):
+        details["field"] = field
+    if isinstance(model, str) and SAFE_NAME_RE.fullmatch(model):
+        details["model"] = model
+    details["reason"] = reason
+    details["hint"] = (reason == "no_model_access" and MODEL_HINTS.get(model)) or REASONS[reason]
+    return ApiError(code, message, details=details)
+
+
 class O3pMcpApi(models.AbstractModel):
     _name = "o3p.mcp.api"
     _description = "MCP Data API"
@@ -265,10 +312,11 @@ class O3pMcpApi(models.AbstractModel):
         database become fixed API errors; their text never leaves the server.
         """
         if not isinstance(params, dict):
-            raise ApiError("invalid_params")
+            raise invalid("bad_value", "params")
         method_name, _scope, keys = self._OPS[op]
-        if not set(params) <= keys:
-            raise ApiError("invalid_params", MSG_KEYS)
+        unknown = sorted(set(params) - keys, key=str)
+        if unknown:
+            raise invalid("unknown_param", unknown[0], message=MSG_KEYS)
         method = getattr(self, method_name)
         self.env.flush_all()
         cr = self.env.cr
@@ -333,7 +381,7 @@ class O3pMcpApi(models.AbstractModel):
             raise ApiError("unknown_model")
         model = self.env[name]
         if not model.has_access("read"):
-            raise ApiError("access_denied")
+            raise invalid("no_model_access", model=name, code="access_denied")
         return model
 
     def _readable_fields(self, model):
@@ -349,12 +397,22 @@ class O3pMcpApi(models.AbstractModel):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _int_param(value, default, low, high):
+    def _int_param(value, default, low, high, name):
         if value is None:
             return default
         if type(value) is not int or not low <= value <= high:
-            raise ApiError("invalid_params", MSG_RANGE)
+            raise invalid("bad_value", name, message=MSG_RANGE)
         return value
+
+    def _field_problem(self, model, name, path, message):
+        """Return the error for ``name`` missing from the usable fields."""
+        if name not in model._fields:
+            reason = "unknown_field"
+        elif name not in self._readable_fields(model):
+            reason = "not_readable"
+        else:
+            reason = "not_filterable"
+        return invalid(reason, path, message=message)
 
     def _fields_param(self, model, value):
         """Return the requested field names, all readable and not hidden."""
@@ -363,66 +421,71 @@ class O3pMcpApi(models.AbstractModel):
             or not 0 < len(value) <= MAX_FIELDS
             or not all(isinstance(name, str) for name in value)
         ):
-            raise ApiError("invalid_params", MSG_FIELDS)
+            raise invalid("bad_value", "fields", message=MSG_FIELDS)
         readable = self._readable_fields(model)
-        if any(name not in readable for name in value):
-            raise ApiError("invalid_params", MSG_FIELDS)
+        for name in value:
+            if name not in readable:
+                reason = "unknown_field" if name not in model._fields else "not_readable"
+                raise invalid(reason, name, message=MSG_FIELDS)
         return list(dict.fromkeys(value))
 
-    def _comodel(self, model, field):
+    def _comodel(self, model, field, path):
         """Return the model ``field`` relates to, as the user, or raise.
 
         The related model must be exposed and searched with its own access
         rules; the user must be allowed to read it.
         """
-        if (
-            not field.relational
-            or field.auto_join
-            or not self._exposed_model(field.comodel_name)
-        ):
-            raise ApiError("invalid_params", MSG_DOMAIN)
+        if not field.relational:
+            raise invalid("not_relational", path, message=MSG_DOMAIN)
+        if field.auto_join:
+            raise invalid("bypass_relation", path, message=MSG_DOMAIN)
+        if not self._exposed_model(field.comodel_name):
+            raise invalid("not_readable", path, message=MSG_DOMAIN)
         comodel = model.env[field.comodel_name]
         if not comodel.has_access("read"):
-            raise ApiError("access_denied")
+            raise invalid("no_relation_access", path, code="access_denied")
         return comodel
 
     @staticmethod
-    def _check_operand(value):
+    def _check_operand(value, path):
         scalars = (str, int, float, bool, type(None))
         if isinstance(value, list):
             if len(value) > MAX_VALUES or not all(isinstance(item, scalars) for item in value):
-                raise ApiError("invalid_params", MSG_DOMAIN)
+                raise invalid("bad_value", path, message=MSG_DOMAIN)
             values = value
         elif isinstance(value, scalars):
             values = [value]
         else:
-            raise ApiError("invalid_params", MSG_DOMAIN)
+            raise invalid("bad_value", path, message=MSG_DOMAIN)
         if any(isinstance(item, str) and len(item) > MAX_STRING for item in values):
-            raise ApiError("invalid_params", MSG_DOMAIN)
+            raise invalid("bad_value", path, message=MSG_DOMAIN)
 
-    def _x2many_term(self, comodel, name, operator, operand):
+    def _x2many_term(self, comodel, name, operator, operand, path):
         """Rewrite a condition on a one2many or many2many field with ``any``.
 
         Odoo applies the related model's record rules to ``any`` / ``not any``
         but not to the short forms (``in`` ids, ``=`` id, ``!= False``…), which
         would reveal hidden related records. Forms without a faithful
-        rewrite (``child_of``, ``parent_of``, comparisons, ``=?``) are refused.
+        rewrite (comparisons, ``=?``) are refused.
         """
         if operator in ("in", "not in"):
             ids = operand if isinstance(operand, list) else [operand]
             if len(ids) > MAX_VALUES or not all(type(item) is int and item > 0 for item in ids):
-                raise ApiError("invalid_params", MSG_DOMAIN)
+                raise invalid("bad_value", path, message=MSG_DOMAIN)
             return [name, "any" if operator == "in" else "not any", [["id", "in", ids]]]
         if operator in ("=", "!="):
             if operand is False or operand is None:
                 return [name, "not any" if operator == "=" else "any", []]
             if type(operand) is int and operand > 0:
                 return [name, "any" if operator == "=" else "not any", [["id", "=", operand]]]
-        if operator in LIKE_OPERATORS and isinstance(operand, str):
-            return self._display_name_term(comodel, name, operator, operand)
-        raise ApiError("invalid_params", MSG_DOMAIN)
+            raise invalid("bad_value", path, message=MSG_DOMAIN)
+        if operator in LIKE_OPERATORS:
+            if not isinstance(operand, str):
+                raise invalid("bad_value", path, message=MSG_DOMAIN)
+            return self._display_name_term(comodel, name, operator, operand, path)
+        raise invalid("bad_operator", path, message=MSG_DOMAIN)
 
-    def _display_name_term(self, comodel, name, operator, operand):
+    def _display_name_term(self, comodel, name, operator, operand, path):
         """Match the related records of field ``name`` by display name.
 
         The related model's record rules apply through ``any``; the display
@@ -430,12 +493,10 @@ class O3pMcpApi(models.AbstractModel):
         allow it).
         """
         values = operand if isinstance(operand, list) else [operand]
-        if (
-            len(values) > MAX_VALUES
-            or any(len(value) > MAX_STRING for value in values)
-            or "display_name" not in self._filterable_fields(comodel)
-        ):
-            raise ApiError("invalid_params", MSG_DOMAIN)
+        if len(values) > MAX_VALUES or any(len(value) > MAX_STRING for value in values):
+            raise invalid("bad_value", path, message=MSG_DOMAIN)
+        if "display_name" not in self._filterable_fields(comodel):
+            raise invalid("not_filterable", path, message=MSG_DOMAIN)
         positive = LIKE_OPERATORS.get(operator) or NAME_OPERATORS[operator]
         return [
             name,
@@ -443,7 +504,7 @@ class O3pMcpApi(models.AbstractModel):
             [["display_name", positive, operand]],
         ]
 
-    def _many2one_term(self, model, field, operator, operand):
+    def _many2one_term(self, model, field, operator, operand, path):
         """Return a condition on a many2one field.
 
         Record ids (and ``false``) are compared with the column itself. Text
@@ -453,25 +514,26 @@ class O3pMcpApi(models.AbstractModel):
         access. A relation that bypasses access is refused by ``_comodel``.
         """
         values = operand if isinstance(operand, list) else [operand]
-        if len(values) <= MAX_VALUES and all(
+        if len(values) > MAX_VALUES:
+            raise invalid("bad_value", path, message=MSG_DOMAIN)
+        if all(
             value is False or value is None or (type(value) is int and value > 0)
             for value in values
         ):
             if operator in LIKE_OPERATORS:
-                raise ApiError("invalid_params", MSG_DOMAIN)
+                raise invalid("bad_value", path, message=MSG_DOMAIN)
             return [field.name, operator, operand]
-        text = all(isinstance(value, str) for value in values)
+        if not all(isinstance(value, str) for value in values):
+            raise invalid("bad_value", path, message=MSG_DOMAIN)
         list_operator = operator in ("in", "not in")
-        if text and (
-            (list_operator and isinstance(operand, list))
-            or (not list_operator and isinstance(operand, str)
-                and (operator in LIKE_OPERATORS or operator in NAME_OPERATORS))
-        ):
-            comodel = self._comodel(model, field)
-            return self._display_name_term(comodel, field.name, operator, operand)
-        raise ApiError("invalid_params", MSG_DOMAIN)
+        if list_operator != isinstance(operand, list):
+            raise invalid("bad_value", path, message=MSG_DOMAIN)
+        if not (operator in LIKE_OPERATORS or operator in NAME_OPERATORS):
+            raise invalid("bad_operator", path, message=MSG_DOMAIN)
+        comodel = self._comodel(model, field, path)
+        return self._display_name_term(comodel, field.name, operator, operand, path)
 
-    def _term(self, model, names, operator, operand, depth):
+    def _term(self, model, names, operator, operand, depth, prefix=""):
         """Return the checked domain term for the field path ``names``.
 
         Every hop must be a readable, non-hidden field. A relational hop
@@ -479,50 +541,57 @@ class O3pMcpApi(models.AbstractModel):
         related model's record rules apply; conditions on one2many and
         many2many fields are rewritten by ``_x2many_term``.
         """
+        path = prefix + names[0]
         field = self._filterable_fields(model).get(names[0])
         if field is None:
-            raise ApiError("invalid_params", MSG_DOMAIN)
+            raise self._field_problem(model, names[0], path, MSG_DOMAIN)
         if len(names) > 1:
-            comodel = self._comodel(model, field)
-            return [field.name, "any", [self._term(comodel, names[1:], operator, operand, depth)]]
+            comodel = self._comodel(model, field, path)
+            return [
+                field.name,
+                "any",
+                [self._term(comodel, names[1:], operator, operand, depth, f"{path}.")],
+            ]
         if operator in ("any", "not any"):
-            comodel = self._comodel(model, field)
-            return [field.name, operator, self._domain_terms(comodel, operand, depth + 1)]
+            comodel = self._comodel(model, field, path)
+            return [
+                field.name,
+                operator,
+                self._domain_terms(comodel, operand, depth + 1, f"{path}."),
+            ]
         if field.type in X2MANY_TYPES:
-            comodel = self._comodel(model, field)
-            return self._x2many_term(comodel, field.name, operator, operand)
+            comodel = self._comodel(model, field, path)
+            return self._x2many_term(comodel, field.name, operator, operand, path)
         if field.type == "many2one":
-            return self._many2one_term(model, field, operator, operand)
-        self._check_operand(operand)
+            return self._many2one_term(model, field, operator, operand, path)
+        self._check_operand(operand, path)
         return [field.name, operator, operand]
 
-    def _domain_terms(self, model, value, depth=0):
+    def _domain_terms(self, model, value, depth=0, prefix=""):
         """Return the checked and rewritten terms of the domain ``value``."""
+        where = prefix.rstrip(".") or "domain"
         if value is None:
             value = []
-        if (
-            not isinstance(value, list)
-            or len(value) > MAX_DOMAIN_ITEMS
-            or depth > MAX_DOMAIN_DEPTH
-        ):
-            raise ApiError("invalid_params", MSG_DOMAIN)
+        if depth > MAX_DOMAIN_DEPTH:
+            raise invalid("too_deep", where, message=MSG_DOMAIN)
+        if not isinstance(value, list) or len(value) > MAX_DOMAIN_ITEMS:
+            raise invalid("bad_domain", where, message=MSG_DOMAIN)
         terms = []
         for item in value:
             if item in ("&", "|", "!"):
                 terms.append(item)
                 continue
             if not isinstance(item, list) or len(item) != 3:
-                raise ApiError("invalid_params", MSG_DOMAIN)
+                raise invalid("bad_domain", where, message=MSG_DOMAIN)
             path, operator, operand = item
             names = path.split(".") if isinstance(path, str) else []
-            if (
-                not isinstance(operator, str)
-                or operator not in OPERATORS
-                or not 0 < len(names) <= MAX_PATH_HOPS
-                or not all(FIELD_NAME_RE.fullmatch(name) for name in names)
-            ):
-                raise ApiError("invalid_params", MSG_DOMAIN)
-            terms.append(self._term(model, names, operator, operand, depth))
+            if not names or not all(FIELD_NAME_RE.fullmatch(name) for name in names):
+                raise invalid("bad_domain", where, message=MSG_DOMAIN)
+            if len(names) > MAX_PATH_HOPS:
+                raise invalid("too_deep", prefix + path, message=MSG_DOMAIN)
+            if not isinstance(operator, str) or operator not in OPERATORS:
+                raise invalid("bad_operator", prefix + path, message=MSG_DOMAIN)
+            terms.append(self._term(model, names, operator, operand, depth, prefix))
         return terms
 
     def _domain_param(self, model, value):
@@ -534,11 +603,11 @@ class O3pMcpApi(models.AbstractModel):
         for item in reversed(terms):
             if item in ("&", "|"):
                 if operands < 2:
-                    raise ApiError("invalid_params", MSG_DOMAIN)
+                    raise invalid("bad_domain", "domain", message=MSG_DOMAIN)
                 operands -= 1
             elif item == "!":
                 if operands < 1:
-                    raise ApiError("invalid_params", MSG_DOMAIN)
+                    raise invalid("bad_domain", "domain", message=MSG_DOMAIN)
             else:
                 operands += 1
         return terms
@@ -548,15 +617,20 @@ class O3pMcpApi(models.AbstractModel):
         if value is None:
             return None
         if not isinstance(value, str) or not value.strip() or len(value) > MAX_STRING:
-            raise ApiError("invalid_params", MSG_ORDER)
-        readable = self._filterable_fields(model)
+            raise invalid("bad_order", "order", message=MSG_ORDER)
+        filterable = self._filterable_fields(model)
         items = []
         for item in value.split(","):
             match = ORDER_ITEM_RE.fullmatch(item.strip())
-            field = match and readable.get(match.group(1))
-            if not field or not field._description_sortable(model.env):
-                raise ApiError("invalid_params", MSG_ORDER)
-            items.append(f"{match.group(1)} {(match.group(2) or 'asc').lower()}")
+            if not match:
+                raise invalid("bad_order", "order", message=MSG_ORDER)
+            name = match.group(1)
+            field = filterable.get(name)
+            if field is None:
+                raise self._field_problem(model, name, name, MSG_ORDER)
+            if not field._description_sortable(model.env):
+                raise invalid("not_sortable", name, message=MSG_ORDER)
+            items.append(f"{name} {(match.group(2) or 'asc').lower()}")
         return ", ".join(items)
 
     def _groupby_param(self, model, value):
@@ -565,20 +639,26 @@ class O3pMcpApi(models.AbstractModel):
             or not 0 < len(value) <= MAX_GROUPBY
             or not all(isinstance(spec, str) for spec in value)
         ):
-            raise ApiError("invalid_params", MSG_GROUPBY)
-        readable = self._filterable_fields(model)
+            raise invalid("bad_value", "groupby", message=MSG_GROUPBY)
+        filterable = self._filterable_fields(model)
         for spec in value:
             match = GROUPBY_RE.fullmatch(spec)
-            field = match and readable.get(match.group(1))
-            if not field or not field._description_groupable(model.env):
-                raise ApiError("invalid_params", MSG_GROUPBY)
-            granularity = match.group(2)
+            if not match:
+                raise invalid("bad_value", "groupby", message=MSG_GROUPBY)
+            name, granularity = match.group(1), match.group(2)
+            field = filterable.get(name)
+            if field is None:
+                raise self._field_problem(model, name, spec, MSG_GROUPBY)
+            if not field._description_groupable(model.env):
+                raise invalid("not_groupable", spec, message=MSG_GROUPBY)
             if field.type in ("date", "datetime"):
                 allowed = DATE_GRANULARITIES | ({"hour"} if field.type == "datetime" else set())
+                if not granularity:
+                    raise invalid("granularity_required", spec, message=MSG_GROUPBY)
                 if granularity not in allowed:
-                    raise ApiError("invalid_params", MSG_GROUPBY)
+                    raise invalid("bad_granularity", spec, message=MSG_GROUPBY)
             elif granularity:
-                raise ApiError("invalid_params", MSG_GROUPBY)
+                raise invalid("bad_granularity", spec, message=MSG_GROUPBY)
         return list(dict.fromkeys(value))
 
     def _aggregates_param(self, model, value):
@@ -587,21 +667,23 @@ class O3pMcpApi(models.AbstractModel):
             or not 0 < len(value) <= MAX_AGGREGATES
             or not all(isinstance(spec, str) for spec in value)
         ):
-            raise ApiError("invalid_params", MSG_AGGREGATES)
-        readable = self._filterable_fields(model)
+            raise invalid("bad_value", "aggregates", message=MSG_AGGREGATES)
+        filterable = self._filterable_fields(model)
         for spec in value:
             if spec == "__count":
                 continue
             match = AGGREGATE_RE.fullmatch(spec)
-            field = match and readable.get(match.group(1))
-            if not field or not field.store:
-                raise ApiError("invalid_params", MSG_AGGREGATES)
+            if not match:
+                raise invalid("bad_aggregate", "aggregates", message=MSG_AGGREGATES)
+            field = filterable.get(match.group(1))
+            if field is None:
+                raise self._field_problem(model, match.group(1), spec, MSG_AGGREGATES)
             function = match.group(2)
-            if not (
+            if not field.store or not (
                 function in COUNT_AGGREGATES
                 or (function in NUMERIC_AGGREGATES and field.type in NUMERIC_TYPES)
             ):
-                raise ApiError("invalid_params", MSG_AGGREGATES)
+                raise invalid("bad_aggregate", spec, message=MSG_AGGREGATES)
         return list(dict.fromkeys(value))
 
     @staticmethod
@@ -610,12 +692,12 @@ class O3pMcpApi(models.AbstractModel):
         if value is None:
             return None
         if not isinstance(value, str) or not value.strip() or len(value) > MAX_STRING:
-            raise ApiError("invalid_params", MSG_GROUP_ORDER)
+            raise invalid("bad_order", "order", message=MSG_GROUP_ORDER)
         items = []
         for item in value.split(","):
             match = GROUP_ORDER_ITEM_RE.fullmatch(item.strip())
             if not match or match.group(1) not in keys:
-                raise ApiError("invalid_params", MSG_GROUP_ORDER)
+                raise invalid("bad_order", "order", message=MSG_GROUP_ORDER)
             items.append(f"{match.group(1)} {(match.group(2) or 'asc').lower()}")
         return ", ".join(items)
 
@@ -655,10 +737,10 @@ class O3pMcpApi(models.AbstractModel):
     def _op_models(self, params):
         query = params.get("query")
         limit = params.get("limit", MAX_MODELS)
-        if (query is not None and (not isinstance(query, str) or len(query) > MAX_QUERY_LENGTH)) or (
-            type(limit) is not int or not 1 <= limit <= MAX_MODELS
-        ):
-            raise ApiError("invalid_params")
+        if query is not None and (not isinstance(query, str) or len(query) > MAX_QUERY_LENGTH):
+            raise invalid("bad_value", "query")
+        if type(limit) is not int or not 1 <= limit <= MAX_MODELS:
+            raise invalid("bad_value", "limit", message=MSG_RANGE)
         names = [
             name
             for name in sorted(self.env.registry)
@@ -721,8 +803,8 @@ class O3pMcpApi(models.AbstractModel):
         domain = self._domain_param(model, params.get("domain"))
         names = self._fields_param(model, params.get("fields"))
         order = self._order_param(model, params.get("order"))
-        limit = self._int_param(params.get("limit"), DEFAULT_LIMIT, 1, MAX_SEARCH)
-        offset = self._int_param(params.get("offset"), 0, 0, MAX_OFFSET)
+        limit = self._int_param(params.get("limit"), DEFAULT_LIMIT, 1, MAX_SEARCH, "limit")
+        offset = self._int_param(params.get("offset"), 0, 0, MAX_OFFSET, "offset")
         records = model.search_fetch(domain, names, offset=offset, limit=limit, order=order)
         rows = records.read(names)
         count = model.search_count(domain)
@@ -737,7 +819,7 @@ class O3pMcpApi(models.AbstractModel):
             or not 0 < len(ids) <= MAX_READ
             or not all(type(value) is int and value > 0 for value in ids)
         ):
-            raise ApiError("invalid_params", MSG_IDS)
+            raise invalid("bad_value", "ids", message=MSG_IDS)
         names = self._fields_param(model, params.get("fields"))
         # Records that do not exist and records the user may not read are left
         # out alike, so the answer does not tell whether a hidden record exists.
@@ -751,7 +833,7 @@ class O3pMcpApi(models.AbstractModel):
         groupby = self._groupby_param(model, params.get("groupby"))
         aggregates = self._aggregates_param(model, params.get("aggregates"))
         order = self._group_order_param(params.get("order"), {*groupby, *aggregates})
-        limit = self._int_param(params.get("limit"), DEFAULT_LIMIT, 1, MAX_GROUPS)
+        limit = self._int_param(params.get("limit"), DEFAULT_LIMIT, 1, MAX_GROUPS, "limit")
         # Every group comes from the records the domain finds for the user;
         # values are formatted as Odoo 20's formatted_read_group does.
         rows = model._read_group(domain, groupby, aggregates, order=order, limit=limit)

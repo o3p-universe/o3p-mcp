@@ -186,5 +186,31 @@
       "status": 429,
       "body": "{\"error\": {\"code\": \"too_many_requests\", \"message\": \"You already have the maximum number of SQL queries running.\"}}"
     }
-  }
+  },
+  "data_api_reasons": {
+    "unknown_param": "Remove the parameters this operation does not take.",
+    "bad_value": "Check the type and the range of this parameter.",
+    "bad_domain": "A domain is a list of [field, operator, value] conditions and the prefix operators &, | and !.",
+    "too_deep": "Paths follow at most 4 fields and sub-domains nest at most 4 levels.",
+    "unknown_field": "Call describe for the model's field names.",
+    "not_readable": "The field is hidden or the user may not read it; describe lists the fields the user may use.",
+    "not_filterable": "This model hides data when it is read: filter, sort and group only on id and its public fields.",
+    "not_searchable": "The field is computed without a search method, so Odoo cannot filter on it; filter on fields describe marks searchable.",
+    "not_sortable": "Sort on fields describe marks sortable.",
+    "not_groupable": "Group on fields describe marks groupable.",
+    "not_relational": "Only relational fields can be followed with a dot or with any / not any.",
+    "bypass_relation": "This relation ignores the related model's access rules: search the related model first, then filter on its record ids.",
+    "no_relation_access": "The user may not read the model this relation points to.",
+    "no_model_access": "The user may not read this model.",
+    "bad_operator": "Use =, !=, >, >=, <, <=, =?, in, not in, like, not like, ilike, not ilike, =like, =ilike, any or not any (child_of and parent_of are not available); on relations compare record ids, or match names with =, in, like or ilike.",
+    "bad_order": "Use field, field asc or field desc items separated by commas.",
+    "bad_aggregate": "Use __count, field:sum|avg|min|max on numeric fields, or field:count|count_distinct on stored fields.",
+    "granularity_required": "Append :day, :week, :month, :quarter or :year to a date field (or :hour to a datetime field).",
+    "bad_granularity": "Only date and datetime fields take a granularity: day, week, month, quarter or year, and hour for datetimes."
+  },
+  "data_api_model_hints": {
+    "hr.employee": "The user may not read hr.employee: use hr.employee.public, which every employee may read."
+  },
+  "data_api_details_example": "{\"error\": {\"code\": \"invalid_params\", \"message\": \"groupby is not valid: use groupable readable fields; date fields need a granularity (day, week, month, quarter, year, or hour for datetimes).\", \"details\": {\"field\": \"create_date\", \"reason\": \"granularity_required\", \"hint\": \"Append :day, :week, :month, :quarter or :year to a date field (or :hour to a datetime field).\"}}}",
+  "data_api_details_source": "o3p_mcp branch 20.0 at 6323bda (REASONS, MODEL_HINTS and the details example, generated from the code)"
 }

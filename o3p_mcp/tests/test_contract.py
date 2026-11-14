@@ -35,6 +35,22 @@ class TestContractParity(O3pMcpApiCase):
     def expected(self, code):
         return next(item for item in CONTRACT["data_api_errors"] if item["code"] == code)
 
+    def test_error_details_match_20(self):
+        self.assertEqual(api_module.REASONS, CONTRACT["data_api_reasons"])
+        self.assertEqual(api_module.MODEL_HINTS, CONTRACT["data_api_model_hints"])
+        example = api_module.invalid(
+            "granularity_required", "create_date", message=api_module.MSG_GROUPBY
+        ).to_dict()
+        self.assertEqual(
+            json.dumps(example, ensure_ascii=False, default=json_default),
+            CONTRACT["data_api_details_example"],
+        )
+        response = self.call(
+            "group", {"model": "res.partner", "groupby": ["create_date"], "aggregates": ["__count"]}
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.text, CONTRACT["data_api_details_example"])
+
     def test_error_table_matches_20(self):
         self.assertEqual(list(ERRORS), [item["code"] for item in CONTRACT["data_api_errors"]])
         for item in CONTRACT["data_api_errors"]:
@@ -70,7 +86,21 @@ class TestContractParity(O3pMcpApiCase):
             with self.subTest(code=code):
                 response = send()
                 self.assertEqual(response.status_code, self.expected(code)["status"])
-                self.assertEqual(response.text, self.expected(code)["body"])
+                body = response.json()
+                details = body["error"].pop("details", None)
+                self.assertEqual(
+                    json.dumps(body, ensure_ascii=False, default=json_default),
+                    self.expected(code)["body"],
+                )
+                if code == "access_denied":
+                    # Validation errors add details (fixed texts compared above).
+                    self.assertEqual(details, {
+                        "model": "ir.cron",
+                        "reason": "no_model_access",
+                        "hint": CONTRACT["data_api_reasons"]["no_model_access"],
+                    })
+                else:
+                    self.assertIsNone(details)
         with patch.object(api_class, "_op_models", side_effect=ValueError("detail")):
             response = self.call("models")
         self.assertEqual(response.text, self.expected("query_error")["body"])
