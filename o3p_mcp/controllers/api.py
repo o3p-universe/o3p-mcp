@@ -2,10 +2,12 @@ import json
 import logging
 import time
 
-from werkzeug.exceptions import MethodNotAllowed
+import psycopg2
+from werkzeug.exceptions import HTTPException, MethodNotAllowed
 
 from odoo import SUPERUSER_ID, api, fields, http
 from odoo.http import request
+from odoo.service.model import PG_CONCURRENCY_EXCEPTIONS_TO_RETRY
 from odoo.tools import json_default
 
 from ..models.api import ApiError
@@ -113,6 +115,17 @@ class O3pMcpApiController(http.Controller):
             if error.status == 401:
                 headers.append(("WWW-Authenticate", 'Basic realm="o3p_mcp"'))
             return api_response(error.status, error.to_dict(), headers)
+        except (HTTPException, *PG_CONCURRENCY_EXCEPTIONS_TO_RETRY):
+            # Werkzeug answers the former; Odoo retries the request on the latter.
+            raise
+        except Exception as exc:  # noqa: BLE001 - the contract's fixed answer, always recorded
+            _logger.warning("MCP data API %s failed unexpectedly: %s", op, type(exc).__name__)
+            if isinstance(exc, psycopg2.Error):
+                # The transaction is aborted; start over to record the call.
+                request.env.cr.rollback()
+            error = ApiError("query_error")
+            audit.update(status=error.status, error=error.code, row_count=0)
+            return api_response(error.status, error.to_dict())
         finally:
             audit["duration_ms"] = int((time.monotonic() - started) * 1000)
             if "status" in audit:

@@ -297,6 +297,9 @@ class O3pMcpApi(models.AbstractModel):
         ) as exc:
             _logger.info("MCP data API %s failed: %s", op, type(exc).__name__)
             raise ApiError("query_error") from exc
+        except Exception as exc:  # noqa: BLE001 - nothing unexpected reaches the client
+            _logger.warning("MCP data API %s failed unexpectedly: %s", op, type(exc).__name__)
+            raise ApiError("query_error") from exc
         finally:
             # Also restores read/write mode and the previous statement timeout.
             cr.execute("ROLLBACK TO SAVEPOINT o3p_mcp_api")
