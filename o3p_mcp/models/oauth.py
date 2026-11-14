@@ -25,6 +25,9 @@ SCOPE_GROUPS = {
     SCOPE_ODOO_SQL: "o3p_mcp.group_mcp_user",
 }
 SCOPES = tuple(SCOPE_GROUPS)
+# Asked for by clients that want refresh tokens; refresh tokens are always
+# issued, so it is accepted and otherwise ignored.
+SCOPE_OFFLINE = "offline_access"
 
 CLIENT_AUTH_METHODS = ("none", "client_secret_post", "client_secret_basic")
 GRANT_TYPES = ("authorization_code", "refresh_token")
@@ -259,6 +262,15 @@ def parse_scope(value):
     return set(value.split()) if isinstance(value, str) else set()
 
 
+def known_scopes(value):
+    """Return the scopes of ``value`` this server knows; the rest is dropped.
+
+    ``offline_access`` and unknown scopes are ignored, as RFC 6749 section
+    3.3 allows; the response's ``scope`` tells the client what it got.
+    """
+    return parse_scope(value) & set(SCOPES)
+
+
 def scope_string(scopes):
     """Return ``scopes`` as a space-separated string in canonical order."""
     return " ".join(scope for scope in SCOPES if scope in scopes)
@@ -420,12 +432,9 @@ class O3pMcpOauth(models.AbstractModel):
             isinstance(resource, str) and same_resource(resource, resource_url)
         ):
             fail("invalid_target", _("Tokens are only issued for %s.", resource_url))
-        requested = parse_scope(params.get("scope")) or set(SCOPES)
-        if not requested <= set(SCOPES) or SCOPE_READ not in requested:
-            fail(
-                "invalid_scope",
-                _("Supported scopes are %s; okf.read is required.", " ".join(SCOPES)),
-            )
+        # Without a known scope, everything is requested; okf.read is needed
+        # for any call, so it is always part of the grant.
+        requested = (known_scopes(params.get("scope")) or set(SCOPES)) | {SCOPE_READ}
         return {
             "client": client,
             "redirect_uri": redirect_uri,
@@ -466,7 +475,7 @@ class O3pMcpOauth(models.AbstractModel):
             "registration_endpoint": f"{issuer}{REGISTER_PATH}",
             "revocation_endpoint": f"{issuer}{REVOKE_PATH}",
             "introspection_endpoint": f"{issuer}{INTROSPECT_PATH}",
-            "scopes_supported": list(SCOPES),
+            "scopes_supported": [*SCOPES, SCOPE_OFFLINE],
             "response_types_supported": ["code"],
             "response_modes_supported": ["query"],
             "grant_types_supported": list(GRANT_TYPES),

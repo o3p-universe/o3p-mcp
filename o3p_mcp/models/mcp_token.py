@@ -6,6 +6,7 @@ from odoo import api, fields, models
 from .api import DEFAULT_LOG_DAYS
 from .oauth import (
     SCOPE_READ,
+    SCOPES,
     OAuthError,
     find_by_secret,
     hash_secret,
@@ -166,7 +167,9 @@ class O3pMcpToken(models.Model):
         if token.refresh_expires_at <= fields.Datetime.now():
             raise OAuthError("invalid_grant", "The refresh token has expired.")
         granted = parse_scope(token.scope)
-        requested = granted if scopes is None else set(scopes)
+        # offline_access and unknown scopes are ignored; nothing known left
+        # means the original grant.
+        requested = set(scopes or ()) & set(SCOPES) or granted
         # Checked before the refresh token is claimed: a bad request must not
         # cost the client its grant.
         if not requested <= granted or SCOPE_READ not in requested:

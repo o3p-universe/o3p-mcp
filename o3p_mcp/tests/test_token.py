@@ -183,6 +183,18 @@ class TestTokenEndpoint(O3pMcpTokenCase):
         self.assertEqual(self.Token._introspect(second["access_token"]), INACTIVE)
         self.assertTokenError(self.refresh(second["refresh_token"]), "invalid_grant")
 
+    def test_granted_scope_is_returned(self):
+        # RFC 6749 section 3.3: the response names the scopes actually granted.
+        tokens = self.tokens_for(scope="okf.read okf.write offline_access unknown")
+        self.assertEqual(tokens["scope"], "okf.read okf.write")
+        self.assertIn("refresh_token", tokens)
+        refreshed = self.refresh(tokens["refresh_token"], scope="offline_access").json()
+        self.assertEqual(refreshed["scope"], "okf.read okf.write")
+        narrowed = self.refresh(refreshed["refresh_token"], scope="okf.read offline_access")
+        self.assertEqual(narrowed.json()["scope"], "okf.read")
+        reader = self.tokens_for("o3p_mcp_reader", scope="okf.read okf.write offline_access")
+        self.assertEqual(reader["scope"], "okf.read")
+
     def test_refresh_can_narrow_scope(self):
         first = self.tokens_for()
         narrowed = self.refresh(first["refresh_token"], scope="okf.read")

@@ -100,8 +100,28 @@ class TestAuthorize(O3pMcpHttpCase):
         self.assertClientError(
             self.get_consent(response_type="token"), "unsupported_response_type"
         )
-        self.assertClientError(self.get_consent(scope="okf.admin"), "invalid_scope")
-        self.assertClientError(self.get_consent(scope="okf.write"), "invalid_scope")
+
+    def test_offline_access_and_unknown_scopes_are_ignored(self):
+        self.authenticate("o3p_mcp_editor", "o3p_mcp_editor")
+        for scope, granted in (
+            ("okf.read okf.write offline_access", "okf.read okf.write"),
+            ("offline_access", "okf.read okf.write odoo.read odoo.sql"),
+            ("okf.admin openid profile", "okf.read okf.write odoo.read odoo.sql"),
+            ("okf.write offline_access", "okf.read okf.write"),
+            ("odoo.read email", "okf.read odoo.read"),
+        ):
+            with self.subTest(scope=scope):
+                page = self.get_consent(scope=scope)
+                self.assertEqual(page.status_code, 200)
+                self.assertNotIn("offline_access", page.text.split("<form")[0])
+                response = self.decide("approve", scope=scope)
+                self.assertEqual(response.status_code, 303)
+                code = self.Code.search([], limit=1)
+                self.assertEqual(code.scope, granted)
+        # The grant never exceeds the user's groups.
+        self.authenticate("o3p_mcp_reader", "o3p_mcp_reader")
+        self.decide("approve", scope="okf.read okf.write offline_access")
+        self.assertEqual(self.Code.search([], limit=1).scope, "okf.read")
 
     def test_untrusted_client_or_redirect_uri_never_redirects(self):
         self.authenticate("o3p_mcp_editor", "o3p_mcp_editor")
@@ -170,7 +190,6 @@ class TestAuthorize(O3pMcpHttpCase):
             ({"code_challenge": None}, "invalid_request"),
             ({"code_challenge_method": "plain"}, "invalid_request"),
             ({"resource": "https://other.example.com/mcp"}, "invalid_target"),
-            ({"scope": "okf.admin"}, "invalid_scope"),
         ):
             with self.subTest(error=error):
                 response = self.get_consent(**overrides)

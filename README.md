@@ -113,10 +113,13 @@ client that has not completed a token exchange within 24 hours is deleted.
 - `resource` must be the configured MCP URL (a trailing slash is ignored).
   When it is omitted, the configured MCP URL is used, since it is the only
   resource Odoo issues tokens for.
-- `scope` may list any of the four scopes and must include `okf.read`;
-  without `scope` all of them are requested. The grant is narrowed to what
-  the user's groups allow, so an MCP user who asks for `okf.write` does not
-  get it. A token only carries the scopes requested when it was authorized:
+- `scope` may list any of the four scopes; `okf.read` is always added,
+  since every call needs it, and without a known scope all four are
+  requested. `offline_access` (asked for by clients that want refresh
+  tokens, which are always issued) and unknown scopes are ignored rather
+  than refused, as RFC 6749 §3.3 allows. The grant is narrowed to what the
+  user's groups allow, so an MCP user who asks for `okf.write` does not get
+  it; the token response's `scope` names what was granted. A token only carries the scopes requested when it was authorized:
   a client that asked for `okf.read okf.write` has to sign in again to use
   the Odoo scopes.
 - A user without the MCP User group sees an error page with a link that
@@ -148,8 +151,10 @@ refused. Responses carry `Cache-Control: no-store`.
   A code is consumed by its first exchange, successful or not; presenting it
   again revokes the tokens it was exchanged for.
 - `grant_type=refresh_token` with `refresh_token` and optionally `scope`
-  (a subset of the original grant that includes `okf.read`; anything else
-  gets `invalid_scope` and leaves the refresh token usable) and `resource`. The user must still be
+  (a subset of the original grant that includes `okf.read`; `offline_access`
+  and unknown scopes are ignored, a scope beyond the grant or without
+  `okf.read` gets `invalid_scope` and leaves the refresh token usable) and
+  `resource`. The user must still be
   active and in the MCP groups: losing the Editor group narrows the new
   token to `okf.read`, losing the User group refuses the refresh and revokes
   the family.
