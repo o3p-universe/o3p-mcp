@@ -85,3 +85,44 @@ class TestErrorDetails(O3pMcpApiCase):
         self.assertEqual(error["details"]["hint"], MODEL_HINTS["hr.employee"])
         self.assertIn("hr.employee.public", error["details"]["hint"])
         self.assertEqual(error["code"], "access_denied")
+
+
+@tagged("post_install", "-at_install")
+class TestNotSearchableFields(O3pMcpApiCase):
+    """Odoo ignores conditions on computed fields it cannot search."""
+
+    def test_unsearchable_fields_are_refused(self):
+        def search(**params):
+            return self.call("search", {"model": "res.partner", "fields": ["name"], **params}, user="admin")
+
+        for domain, field in (
+            ([["active_lang_count", "=", 0]], "active_lang_count"),
+            ([["contact_address", "ilike", "x"]], "contact_address"),
+            ([["same_vat_partner_id.name", "=", "x"]], "same_vat_partner_id"),
+            ([["parent_id.active_lang_count", ">", 0]], "parent_id.active_lang_count"),
+            ([["category_id", "any", [["partner_ids.contact_address", "=", "x"]]]],
+             "category_id.partner_ids.contact_address"),
+        ):
+            with self.subTest(domain=domain):
+                self.assertDetails(search(domain=domain), "invalid_params", "not_searchable", field)
+        self.assertDetails(search(order="active_lang_count"), "invalid_params", "not_sortable", "active_lang_count")
+        self.assertDetails(
+            self.call("group", {"model": "res.partner", "groupby": ["active_lang_count"], "aggregates": ["__count"]},
+                      user="admin"),
+            "invalid_params", "not_groupable", "active_lang_count",
+        )
+
+    def test_searchable_computed_fields_still_work(self):
+        names = [
+            row["name"]
+            for row in self.result(
+                "search", {"model": "res.partner", "domain": [["display_name", "ilike", "MCPT Alpha"]],
+                           "fields": ["name"]},
+            )["records"]
+        ]
+        self.assertEqual(names, ["MCPT Alpha"])
+        response = self.call(
+            "search", {"model": "res.users", "domain": [["res_users_settings_id", "=", False]], "fields": ["login"]},
+            user="admin",
+        )
+        self.assertEqual(response.status_code, 200, response.text)

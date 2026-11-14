@@ -300,6 +300,12 @@ part, or a parameter the operation does not take, is refused with
   such text conditions are refused, since Odoo would match names, e-mails or
   VAT numbers of records the user may not read; search the related model
   first and filter on its ids.
+- Every field a condition uses, at every step of its path, must be
+  searchable: stored, or computed with a search method (`describe` marks
+  it). Odoo silently ignores a condition on a computed field it cannot
+  search, which would give a wrong answer without an error, so the API
+  refuses it (`not_searchable`). Sorting and grouping likewise need fields
+  Odoo can sort and group on (`not_sortable`, `not_groupable`).
 - Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `=?`, `in`, `not in`,
   `like`, `not like`, `ilike`, `not ilike`, `=like`, `=ilike`, `any`,
   `not any`. Values are JSON scalars or lists of scalars. `child_of` and
