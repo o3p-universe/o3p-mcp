@@ -18,7 +18,7 @@ The addon adds an **MCP** privilege with two groups:
 | `okf.read` | Any MCP call; required in every token |
 | `okf.write` | Live write tools and producer runs on the knowledge base |
 | `odoo.read` | Reading Odoo records through the data API, with the user's own rights |
-| `odoo.sql` | Reserved for permission-scoped SQL; no operation uses it yet |
+| `odoo.sql` | Running read-only SQL through the data API on the rows the user may read |
 Only active internal users hold scopes: archived users, portal and public
 users (even when placed in an MCP group) and users without the User group
 hold none.
@@ -205,7 +205,7 @@ JSON body:
 Odoo checks the token as introspection does (unrevoked, unexpired, issued to
 an active client for the configured MCP server URL, user active and internal,
 not a portal user, `okf.read` still allowed by the groups) and requires the
-operation's scope (`odoo.read`). The operation then runs as that user, in the
+operation's scope (`odoo.read`, or `odoo.sql` for `sql`). The operation then runs as that user, in the
 user's language and time zone: Odoo's access rights, record rules and field
 groups decide what the answer contains. It runs in a read-only database
 transaction with a time limit, so it cannot change anything. The endpoint
@@ -213,7 +213,8 @@ answers no cross-origin requests and never creates a session.
 
 A success is `200 { "result": … }`. An error is
 `{ "error": { "code": "…", "message": "…" } }` with a fixed message that
-never contains an exception text, a parameter or record data:
+never contains an exception text, a parameter or record data (the one
+exception, PostgreSQL's answer to an SQL query, is described under SQL):
 
 | Status | Code | When |
 |---|---|---|
@@ -222,10 +223,12 @@ never contains an exception text, a parameter or record data:
 | 403 | `invalid_token` | The user's token fails any check above |
 | 403 | `insufficient_scope` | The token lacks the operation's scope |
 | 403 | `access_denied` | The user may not read the model or the records |
-| 404 | `unknown_op` | The operation does not exist (`sql` is reserved and not offered yet) |
+| 404 | `unknown_op` | The operation does not exist |
 | 404 | `unknown_model` | The model does not exist, is transient or abstract, or is hidden |
 | 413 | `result_too_large` | The answer exceeds the configured size |
 | 422 | `query_error` | The database or the ORM refused the query |
+| 429 | `too_many_requests` | SQL only: the user, or all users together, already run the most queries allowed at once |
+| 503 | `unavailable` | SQL only: no sandbox is configured, or it cannot be reached |
 | 504 | `timeout` | The query exceeded the time limit |
 
 ### Operations
@@ -296,6 +299,82 @@ other salespeople the user may not open; the API returns the same numbers
 the product form shows that user. Add such fields to the hidden field names
 if they should not reach MCP clients.
 
+### SQL
+
+The `sql` operation (scope `odoo.sql`) runs one read-only PostgreSQL query
+written against Odoo's table and column names, on the rows and fields the
+user may read, and nothing else:
+
+| Parameters | Result |
+|---|---|
+| `query` (one `SELECT`, `VALUES` or `TABLE` statement, at most 20000 characters), `limit` (1–1000, default 100) | `{ "columns": [{ "name", "type" }], "rows": [[…]], "truncated", "elapsedMs", "tables": [{ "name", "model", "rows" }] }` |
+
+The query never runs in Odoo's database. For every table it names, Odoo
+selects, as the user, the records the user may read: the result of the
+model's search with the user's access rights, record rules and companies
+(all the companies of the user), archived records included, and for a model
+stored partly in a parent model (`_inherits`, such as `res_users` in
+`res_partner`) the parent's rules too. Only the columns the query names
+are taken, and only stored fields the user may read (field groups) and the
+data API does not hide; translated fields hold the text in the user's
+language and company-dependent fields the value for the user's company. A
+many-to-many table holds only the pairs whose both records the user may
+read. These rows are copied into temporary tables of a separate PostgreSQL
+server (the sandbox), where the query runs in a read-only transaction, as a
+database role without any privilege, within the data API's time limit.
+The sandbox connection is closed after each query.
+
+What a user can therefore see:
+
+- the same records and fields as in Odoo, under the table and column names
+  of the database (`res_partner.name`, `sale_order.amount_total`; `describe`
+  gives a model's table), with stored values Odoo computed with elevated
+  rights as described above;
+- joins, aggregates, window functions, common table expressions and
+  PostgreSQL's functions over those rows only: a join from a partner to
+  its orders counts only the orders the user may read.
+
+What a user cannot see or do:
+
+- records outside the user's rights, fields outside the user's groups,
+  hidden models and fields (the data API's lists, plus `ir.attachment`,
+  `mail.message` and any model whose reads an addon customises), columns
+  pointing to a hidden model, binary columns, non-stored fields and
+  one-to-many fields (join the other table instead);
+- a table that is unknown, hidden or not readable: all three answer
+  `relation "…" does not exist`, so the answer does not tell them apart;
+- Odoo's database, files, other databases or other users' queries; any
+  write; several statements; `SELECT INTO`, `FOR UPDATE`, `COPY`.
+
+Limits: each table the query names may hold at most the configured rows
+for the user (default 200000) and the copied data at most the configured
+size (default 64 MB), otherwise `result_too_large`; each user runs at most
+the configured number of queries at once (default 2), and all users
+together at most one per sandbox role (default 4), otherwise
+`too_many_requests`; the copy and the query each stop at the data API's
+time limit (`timeout`). Names in the query decide what is copied, so a
+query that names few columns of large tables is faster than `SELECT *`.
+
+Values come as JSON: numbers for integer, numeric and float columns,
+ISO 8601 strings for dates and times, seconds for intervals, objects and
+arrays for `json`, `jsonb` and arrays, `\x…` hexadecimal for `bytea`, text
+for anything else; `type` is PostgreSQL's type name. `tables` lists the
+tables copied, with their model (empty for a many-to-many table) and the
+number of rows the user may read in them.
+
+A `query_error` from `sql` carries PostgreSQL's own answer, because the
+sandbox holds only rows the user may read:
+
+```json
+{ "error": { "code": "query_error", "message": "The query could not be run.",
+  "details": { "sqlstate": "42703", "position": 8,
+               "message": "column \"nope\" does not exist" } } }
+```
+
+`position` is the character position in the query (1-based) or `null`;
+`message` holds at most 500 characters. A statement other than one
+`SELECT` is refused with `sqlstate` `0A000`, a syntax error with `42601`.
+
 ### Hidden models and fields
 
 Some data is never exposed, whatever the user's rights, administrators
@@ -333,8 +412,9 @@ tests until it is hidden or reviewed.
 
 Every call that reaches the operation or fails authentication is recorded
 in **Settings › Technical › MCP › API Calls**: time, user, MCP client,
-operation, model, HTTP status, error code, row count and duration. Parameters
-and results are never stored. Rows older than the configured number of days
+operation, model (for `sql`: the tables copied), HTTP status, error code,
+row count and duration. Parameters, SQL queries and results are never
+stored. Rows older than the configured number of days
 (default 30) are deleted by the daily scheduled action.
 
 ## Settings
@@ -354,6 +434,15 @@ values under `o3p_mcp.*`:
 | Data API largest answer (KB; stored in bytes) | `o3p_mcp.api_max_response_bytes` | 1000 KB |
 | Data API time limit per query (seconds) | `o3p_mcp.api_timeout_seconds` | 15 |
 | Data API call log retention (days) | `o3p_mcp.api_log_days` | 30 |
+| SQL sandbox host; empty disables `sql` | `o3p_mcp.sql_host` | empty |
+| SQL sandbox port | `o3p_mcp.sql_port` | 5432 |
+| SQL sandbox database | `o3p_mcp.sql_database` | `o3p_sqlbox` |
+| SQL sandbox role prefix (roles `<prefix>_1` … `<prefix>_<count>`) | `o3p_mcp.sql_user` | `o3p_sqlbox` |
+| SQL sandbox role count: queries running at once over all users, 1 to 100 | `o3p_mcp.sql_roles` | 4 |
+| SQL sandbox SSL mode (libpq `sslmode`) | `o3p_mcp.sql_sslmode` | `prefer` |
+| SQL queries per user at once, 1 to 64 | `o3p_mcp.sql_user_concurrency` | 2 |
+| SQL rows per table | `o3p_mcp.sql_max_rows` | 200000 |
+| SQL data copied per query (MB; stored in bytes) | `o3p_mcp.sql_max_copy_bytes` | 64 MB |
 
 The issuer is used for the metadata, the endpoint URLs and the `iss`
 parameter. It does not follow `web.base.url`, which Odoo rewrites whenever
@@ -367,6 +456,16 @@ metadata URL and the introspection URL, and offers two buttons:
 - **Check MCP server** calls the `/health` URL next to the MCP endpoint
   (`https://mcp.example.com/mcp` → `https://mcp.example.com/health`) and
   reports the HTTP status.
+
+The SQL block also shows where the sandbox password was found, and **Check
+SQL sandbox** logs in as every sandbox role and reports any problem: a role
+attribute (superuser, `CREATEROLE`, `CREATEDB`, replication, `BYPASSRLS`),
+a connection limit other than 1, a role membership, a privilege beyond
+`CONNECT` and `TEMPORARY` on the sandbox database, a schema the role may
+create objects in, relations or extensions in the sandbox database, another
+database the role may enter, file or large-object functions it may run, a
+sandbox on the server that holds the Odoo database, or a role that can log
+in to the Odoo database. It notes an unlimited `temp_file_limit`.
 
 ## Management
 
@@ -443,15 +542,67 @@ at once in Odoo (the MCP server may cache an answer for up to a minute).
   alone: serve a single database or set `dbfilter` so the host name selects
   it.
 
+## SQL sandbox setup
+
+The `sql` operation needs its own PostgreSQL server (tested with 17),
+separate from the one holding the Odoo database, reachable from Odoo, with
+an empty database and one login role per query that may run at once. With
+Docker, an extra `postgres` service is enough; it holds no data and can
+run on temporary storage.
+
+1. Choose a password and run `scripts/sandbox-setup.sql` on the sandbox
+   server as its superuser:
+
+   ```sh
+   psql -h sandbox -U postgres -d postgres \
+        -v password="$O3P_SQL_PASSWORD" -v roles=4 \
+        -v prefix=o3p_sqlbox -v database=o3p_sqlbox \
+        -f scripts/sandbox-setup.sql
+   ```
+
+   It creates the database `o3p_sqlbox` and the roles `o3p_sqlbox_1` …
+   `o3p_sqlbox_4`, all with that password: login, no other attribute, no
+   membership, `CONNECTION LIMIT 1`, `CONNECT` and `TEMPORARY` on the
+   sandbox database only, `temp_file_limit` 256 MB, `work_mem` 32 MB. It
+   closes every database of that server to `PUBLIC` and takes the `public`
+   schema of the sandbox database away from `PUBLIC`. Running it again
+   resets the passwords and limits. With the official `postgres` image,
+   mounting `scripts/sandbox-init.sh` into `/docker-entrypoint-initdb.d/`
+   and `scripts/sandbox-setup.sql` at `/o3p/sandbox-setup.sql` runs it at
+   first start from the `O3P_SQL_PASSWORD`, `O3P_SQL_ROLES`,
+   `O3P_SQL_USER` and `O3P_SQL_DATABASE` variables
+   (`scripts/compose.test.yaml` shows the service).
+2. Give Odoo the password through the `O3P_SQL_PASSWORD` environment
+   variable, or as `o3p_sql_password` in the `[options]` section of the
+   Odoo configuration file (Odoo then logs that it does not know the
+   option, and keeps it). The password is never stored in the database.
+3. In **Settings › MCP › SQL**, enter the sandbox host (and port, database,
+   role prefix and count if they differ), save, and press **Check SQL
+   sandbox**.
+
+Each Odoo database needs its own sandbox roles (another prefix, or another
+server): the advisory locks that hand out roles are per Odoo database. The
+sandbox server sees the Odoo server only as a client, and the roles cannot
+log in to the Odoo database because they do not exist there.
+
 ## Installation
 
 Copy the `o3p_mcp` folder into an addons path and install **o3p - mcp**, or use
 the O3P installer with `o3p-mcp.o3p.json`. The addon depends on `base_setup`
-and `web` and uses the Python `requests` package.
+and `web` and uses the Python packages `requests`, `idna` and `pglast` (the
+PostgreSQL parser that checks SQL queries; `pip install pglast`).
 
 ## Tests
 
-`scripts/run-tests.sh` starts PostgreSQL 17 and Odoo 20 with Docker Compose,
-installs the addon in a throw-away database, runs its tests and removes the
-containers again. An optional argument replaces the default test tags
-(`/o3p_mcp`).
+`scripts/run-tests.sh` starts PostgreSQL 17, a second PostgreSQL 17 server
+as the SQL sandbox (set up by `scripts/sandbox-setup.sql`) and Odoo 20 with
+`pglast` added (`scripts/Dockerfile.test`, built on first use) with Docker
+Compose, installs the addon in a throw-away database, runs its tests and
+removes the containers again. An optional argument replaces the default
+test tags (`/o3p_mcp`); `O3P_MCP_TEST_PROJECT` changes the Compose project
+name (default `o3p-mcp-test`). The SQL tests compare, for every table and
+four users with different rights and companies, the rows SQL sees with
+what the ORM shows, and run the escape attempts of
+`o3p_mcp/tests/sql_attacks.py` (role switching, schema-qualified names,
+functions that run SQL, files, catalogs, several statements, timeouts and
+more): every attempt must fail and no answer may contain hidden data.
