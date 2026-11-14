@@ -226,8 +226,13 @@ never contains an exception text, a parameter or record data:
 
 | `search` | `model`, `domain`, `fields`, `order`?, `limit` (1–200, default 80), `offset`? (0–1000000) | `{ "records", "count", "truncated" }` |
 | `read` | `model`, `ids` (1–100), `fields` | `{ "records" }` |
+| `group` | `model`, `domain`, `groupby` (1–5), `aggregates` (1–20), `order`?, `limit` (1–500, default 80) | `{ "groups": [{ <groupby and aggregate keys> }] }` |
 
-`models` never lists transient, abstract or hidden models. Records come in
+`group` runs Odoo's grouped read as the user, so counts and totals cover
+only the records the user may read; it never adds empty groups. Group
+values come as in the web client: `[id, name]` for relations,
+`[start, label]` for dates. `models` never lists transient, abstract or
+hidden models. Records come in
 Odoo's `read` format: `id` plus the requested fields, many-to-one values as
 `[id, name]`, dates and datetimes as UTC strings. `count` counts every record
 the domain matches for the user; `truncated` tells whether more follow.
@@ -248,6 +253,14 @@ part, or a parameter the operation does not take, is refused with
   scalars.
 - `order` is a comma-separated list of `field`, `field asc` or `field desc`
   on sortable, readable, non-hidden fields.
+- `groupby` items are groupable readable fields; date and datetime fields
+  need a granularity (`date:month`: `day`, `week`, `month`, `quarter`,
+  `year`, and `hour` for datetimes) and other fields take none.
+- `aggregates` items are `__count`, `field:sum`, `field:avg`, `field:min` or
+  `field:max` on numeric (integer, float, monetary) readable fields, and
+  `field:count` or `field:count_distinct` on stored readable fields.
+- `group` orders by its own items: `amount_total:sum desc`, `__count desc`,
+  `date:month asc`.
 - `read` returns the records the user may read, in the order of `ids`; ids
   that do not exist and records the user may not read are left out alike,
   so the answer does not reveal whether a hidden record exists.

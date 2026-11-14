@@ -30,6 +30,9 @@ DEFAULT_LOG_DAYS = 30
 MAX_MODELS = 50
 MAX_QUERY_LENGTH = 200
 MAX_SEARCH = 200
+MAX_GROUPS = 500
+MAX_GROUPBY = 5
+MAX_AGGREGATES = 20
 MAX_READ = 100
 MAX_OFFSET = 1_000_000
 DEFAULT_LIMIT = 80
@@ -41,6 +44,15 @@ MAX_VALUES = 1000
 MAX_STRING = 1000
 FIELD_NAME_RE = re.compile(r"[a-z_][a-z0-9_]*")
 ORDER_ITEM_RE = re.compile(r"([a-z_][a-z0-9_]*)(?: +(asc|desc))?", re.IGNORECASE)
+GROUP_ORDER_ITEM_RE = re.compile(
+    r"(__count|[a-z_][a-z0-9_]*(?::[a-z_]+)?)(?: +(asc|desc))?", re.IGNORECASE
+)
+GROUPBY_RE = re.compile(r"([a-z_][a-z0-9_]*)(?::([a-z_]+))?")
+AGGREGATE_RE = re.compile(r"([a-z_][a-z0-9_]*):([a-z_]+)")
+NUMERIC_TYPES = frozenset({"integer", "float", "monetary"})
+NUMERIC_AGGREGATES = frozenset({"sum", "avg", "min", "max"})
+COUNT_AGGREGATES = frozenset({"count", "count_distinct"})
+DATE_GRANULARITIES = frozenset({"day", "week", "month", "quarter", "year"})
 
 MSG_FIELDS = "A requested field is unknown, hidden or not readable."
 MSG_DOMAIN = (
@@ -50,6 +62,15 @@ MSG_ORDER = "The order is not valid: use 'field' or 'field desc' items on sortab
 MSG_RANGE = "limit or offset is out of range."
 MSG_IDS = "ids must be a list of 1 to 100 record ids."
 MSG_KEYS = "The operation does not take one of the parameters."
+MSG_GROUPBY = (
+    "groupby is not valid: use groupable readable fields; date fields need a "
+    "granularity (day, week, month, quarter, year, or hour for datetimes)."
+)
+MSG_AGGREGATES = (
+    "aggregates are not valid: use __count, field:sum|avg|min|max on numeric "
+    "readable fields, or field:count|count_distinct on stored readable fields."
+)
+MSG_GROUP_ORDER = "The order is not valid: use groupby or aggregate items with asc or desc."
 # Domain operators accepted from clients.
 OPERATORS = frozenset(
     {
@@ -109,6 +130,11 @@ class O3pMcpApi(models.AbstractModel):
             {"model", "domain", "fields", "order", "limit", "offset"},
         ),
         "read": ("_op_read", SCOPE_ODOO_READ, {"model", "ids", "fields"}),
+        "group": (
+            "_op_group",
+            SCOPE_ODOO_READ,
+            {"model", "domain", "groupby", "aggregates", "order", "limit"},
+        ),
     }
 
     # ------------------------------------------------------------------
@@ -214,7 +240,15 @@ class O3pMcpApi(models.AbstractModel):
             raise ApiError("access_denied") from exc
         except pg_errors.QueryCanceled as exc:
             raise ApiError("timeout") from exc
-        except (psycopg2.Error, UserError, ValidationError, ValueError, TypeError, KeyError) as exc:
+        except (
+            psycopg2.Error,
+            UserError,
+            ValidationError,
+            ValueError,
+            TypeError,
+            KeyError,
+            AssertionError,
+        ) as exc:
             _logger.info("MCP data API %s failed: %s", op, type(exc).__name__)
             raise ApiError("query_error") from exc
         finally:
@@ -382,6 +416,66 @@ class O3pMcpApi(models.AbstractModel):
             items.append(f"{match.group(1)} {(match.group(2) or 'asc').lower()}")
         return ", ".join(items)
 
+    def _groupby_param(self, model, value):
+        if (
+            not isinstance(value, list)
+            or not 0 < len(value) <= MAX_GROUPBY
+            or not all(isinstance(spec, str) for spec in value)
+        ):
+            raise ApiError("invalid_params", MSG_GROUPBY)
+        readable = self._readable_fields(model)
+        for spec in value:
+            match = GROUPBY_RE.fullmatch(spec)
+            field = match and readable.get(match.group(1))
+            if not field or not field._description_groupable(model.env):
+                raise ApiError("invalid_params", MSG_GROUPBY)
+            granularity = match.group(2)
+            if field.type in ("date", "datetime"):
+                allowed = DATE_GRANULARITIES | ({"hour"} if field.type == "datetime" else set())
+                if granularity not in allowed:
+                    raise ApiError("invalid_params", MSG_GROUPBY)
+            elif granularity:
+                raise ApiError("invalid_params", MSG_GROUPBY)
+        return list(dict.fromkeys(value))
+
+    def _aggregates_param(self, model, value):
+        if (
+            not isinstance(value, list)
+            or not 0 < len(value) <= MAX_AGGREGATES
+            or not all(isinstance(spec, str) for spec in value)
+        ):
+            raise ApiError("invalid_params", MSG_AGGREGATES)
+        readable = self._readable_fields(model)
+        for spec in value:
+            if spec == "__count":
+                continue
+            match = AGGREGATE_RE.fullmatch(spec)
+            field = match and readable.get(match.group(1))
+            if not field or not field.store:
+                raise ApiError("invalid_params", MSG_AGGREGATES)
+            function = match.group(2)
+            if not (
+                function in COUNT_AGGREGATES
+                or (function in NUMERIC_AGGREGATES and field.type in NUMERIC_TYPES)
+            ):
+                raise ApiError("invalid_params", MSG_AGGREGATES)
+        return list(dict.fromkeys(value))
+
+    @staticmethod
+    def _group_order_param(value, keys):
+        """Return an order on groupby or aggregate items, or None."""
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value.strip() or len(value) > MAX_STRING:
+            raise ApiError("invalid_params", MSG_GROUP_ORDER)
+        items = []
+        for item in value.split(","):
+            match = GROUP_ORDER_ITEM_RE.fullmatch(item.strip())
+            if not match or match.group(1) not in keys:
+                raise ApiError("invalid_params", MSG_GROUP_ORDER)
+            items.append(f"{match.group(1)} {(match.group(2) or 'asc').lower()}")
+        return ", ".join(items)
+
     def _model_labels(self, names):
         records = (
             self.env["ir.model"]
@@ -477,3 +571,19 @@ class O3pMcpApi(models.AbstractModel):
         records = model.browse(list(dict.fromkeys(ids))).exists()._filtered_access("read")
         rows = records.read(names)
         return {"records": rows}, model._name, len(rows)
+
+    def _op_group(self, params):
+        model = self._model(params.get("model"))
+        domain = self._domain_param(model, params.get("domain"))
+        groupby = self._groupby_param(model, params.get("groupby"))
+        aggregates = self._aggregates_param(model, params.get("aggregates"))
+        order = self._group_order_param(params.get("order"), {*groupby, *aggregates})
+        limit = self._int_param(params.get("limit"), DEFAULT_LIMIT, 1, MAX_GROUPS)
+        # No group expansion or temporal filling: every group comes from the
+        # records the domain finds for the user.
+        groups = model.with_context(read_group_expand=False, fill_temporal=False).formatted_read_group(
+            domain, groupby, aggregates, order=order, limit=limit
+        )
+        keys = (*groupby, *aggregates)
+        result = [{key: group[key] for key in keys} for group in groups]
+        return {"groups": result}, model._name, len(result)

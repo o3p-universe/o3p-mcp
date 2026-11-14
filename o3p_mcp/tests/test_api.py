@@ -496,3 +496,95 @@ class TestApiSearchRead(O3pMcpApiCase):
         self.assertIsInstance(rows[0]["create_date"], str)
         self.env["ir.config_parameter"].sudo().set_int("o3p_mcp.api_max_response_bytes", 150)
         self.assertApiError(self.call("search", {"model": "res.partner", "domain": MCPT, "fields": ["name"]}, user="admin"), "result_too_large")
+
+
+@tagged("post_install", "-at_install")
+class TestApiGroup(O3pMcpApiCase):
+    def group(self, user="restricted", **params):
+        params = {"model": "res.partner", "domain": MCPT, **params}
+        return self.result("group", params, user=user)
+
+    def assertInvalid(self, user="restricted", **params):
+        params = {"model": "res.partner", "domain": MCPT, **params}
+        self.assertApiError(self.call("group", params, user=user), "invalid_params")
+
+    def test_totals_never_include_hidden_rows(self):
+        params = {"groupby": ["type"], "aggregates": ["__count", "color:sum", "color:max"]}
+        self.assertEqual(
+            self.group(**params),
+            {"groups": [{"type": "contact", "__count": 2, "color:sum": 7, "color:max": 4}]},
+        )
+        self.assertEqual(
+            self.group(user="admin", **params)["groups"],
+            [{"type": "contact", "__count": 4, "color:sum": 307, "color:max": 200}],
+        )
+        # Grouping by a relation shows only groups of readable records.
+        groups = self.group(groupby=["category_id"], aggregates=["__count"])["groups"]
+        self.assertEqual(groups, [{"category_id": [self.visible.id, "MCP visible"], "__count": 2}])
+        admin = self.group(user="admin", groupby=["category_id"], aggregates=["__count"])["groups"]
+        self.assertEqual(sum(group["__count"] for group in admin), 4)
+
+    def test_order_on_aggregates_and_limit(self):
+        groups = self.group(
+            user="admin", groupby=["name"], aggregates=["color:sum", "__count"],
+            order="color:sum desc, __count desc", limit=2,
+        )["groups"]
+        self.assertEqual([group["name"] for group in groups], ["MCPT Hidden Two", "MCPT Hidden One"])
+        groups = self.group(user="admin", groupby=["name"], aggregates=["__count"], order="name DESC")["groups"]
+        self.assertEqual(groups[0]["name"], "MCPT Hidden Two")
+        for order in ("color desc", "color:avg desc", "__count; drop", "name nulls first", 3):
+            with self.subTest(order=order):
+                self.assertInvalid(groupby=["name"], aggregates=["color:sum"], order=order)
+        for limit in (0, 501, "5"):
+            with self.subTest(limit=limit):
+                self.assertInvalid(groupby=["name"], aggregates=["__count"], limit=limit)
+
+    def test_granularity_and_counts(self):
+        groups = self.group(groupby=["create_date:month"], aggregates=["__count", "name:count_distinct"])["groups"]
+        self.assertEqual(sum(group["__count"] for group in groups), 2)
+        self.assertEqual(groups[0]["name:count_distinct"], 2)
+        self.assertEqual(len(groups[0]["create_date:month"]), 2)
+        self.assertEqual(self.group(groupby=["create_date:hour"], aggregates=["__count"])["groups"][0]["__count"], 2)
+        for groupby in (["create_date"], ["name:month"], ["create_date:decade"], ["display_name"], ["nope"], [], "name", ["a", "b", "c", "d", "e", "f"]):
+            with self.subTest(groupby=groupby):
+                self.assertInvalid(groupby=groupby, aggregates=["__count"])
+
+    def test_aggregate_validation(self):
+        for aggregates in (
+            ["name:sum"],
+            ["color:array_agg"],
+            ["color:bool_and"],
+            ["nope:sum"],
+            ["display_name:count"],
+            ["color"],
+            ["color:sum:x"],
+            [],
+            "__count",
+        ):
+            with self.subTest(aggregates=aggregates):
+                self.assertInvalid(groupby=["type"], aggregates=aggregates)
+        self.assertInvalid(groupby=["type"])
+
+    def test_field_groups_and_denylist(self):
+        with self.protected_field("res.partner", "function"):
+            for params in (
+                {"groupby": ["function"], "aggregates": ["__count"]},
+                {"groupby": ["type"], "aggregates": ["function:count"]},
+                {"groupby": ["type"], "aggregates": ["__count"], "domain": [["function", "=", "x"]]},
+            ):
+                with self.subTest(params=params):
+                    self.assertInvalid(**params)
+            self.assertEqual(
+                sum(g["__count"] for g in self.group(user="admin", groupby=["function"], aggregates=["__count"])["groups"]),
+                4,
+            )
+        self.env["ir.config_parameter"].sudo().set_str(
+            "o3p_mcp.api_denied_fields", "\n".join([*DEFAULT_DENIED_FIELDS, "color"])
+        )
+        for params in (
+            {"groupby": ["color"], "aggregates": ["__count"]},
+            {"groupby": ["type"], "aggregates": ["color:sum"]},
+            {"groupby": ["type"], "aggregates": ["__count"], "domain": [["color", ">", 0]]},
+        ):
+            with self.subTest(params=params):
+                self.assertInvalid(user="admin", **params)
