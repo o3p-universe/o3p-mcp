@@ -32,6 +32,19 @@ class TestInstall(O3pMcpCommon, TransactionCase):
         self.assertFalse(self.user_group.model_access)
         self.assertFalse(self.editor_group.model_access)
 
+    def test_user_form_offers_one_mcp_selection(self):
+        # Odoo 18 turns a category whose groups imply each other into one
+        # selection field on the user form.
+        name = "sel_groups_" + "_".join(
+            str(group_id) for group_id in sorted((self.user_group | self.editor_group).ids)
+        )
+        description = self.env["res.users"].fields_get([name])[name]
+        self.assertEqual(description["type"], "selection")
+        self.assertEqual(
+            [label for _value, label in description["selection"]][1:], ["User", "Editor"]
+        )
+        self.assertEqual(self.editor.read([name])[0][name], self.editor_group.id)
+
     def test_scopes_for_user(self):
         oauth = self.env["o3p.mcp.oauth"]
         self.assertEqual(oauth._scopes_for_user(self.plain), set())
