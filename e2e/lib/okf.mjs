@@ -6,12 +6,22 @@ import path from "node:path";
 
 const require = createRequire(import.meta.url);
 
-// bin/okf-mcp.js of the okf-mcp checkout: OKF_MCP_DIR, else the package
-// this directory depends on by path.
+// The directory of an okf package (run.sh sets OKF_MCP_DIR and OKF_ODOO_DIR
+// to a checkout with its dependencies installed, or to a published version
+// it installed), else the package as installed next to this suite.
+export function packageDir(name, variable) {
+  const dir = process.env[variable];
+  if (dir) return dir;
+  try {
+    return path.dirname(require.resolve(`${name}/package.json`));
+  } catch {
+    throw new Error(`${name} not found: set ${variable} (see e2e/README.md).`);
+  }
+}
+
+// bin/okf-mcp.js of okf-mcp.
 export function okfBin() {
-  const dir =
-    process.env.OKF_MCP_DIR || path.dirname(require.resolve("@mfdaves/okf-mcp/package.json"));
-  return path.join(dir, "bin", "okf-mcp.js");
+  return path.join(packageDir("@mfdaves/okf-mcp", "OKF_MCP_DIR"), "bin", "okf-mcp.js");
 }
 
 // `root` serves one bundle; `project` an okf.project.yaml (bundles, tool

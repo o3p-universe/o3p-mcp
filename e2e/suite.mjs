@@ -5,6 +5,7 @@
 //
 //   node suite.mjs --setup <setup.json> --work <directory> [--only 1,2,9]
 import fs from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import { parseArgs } from "node:util";
 
@@ -554,6 +555,18 @@ async function scenario7() {
 // 8. Health button
 // ---------------------------------------------------------------------------
 
+// A loopback port nothing listens on (bound once and released).
+function unusedPort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const { port } = server.address();
+      server.close(() => resolve(port));
+    });
+  });
+}
+
 async function pressHealth(session, values = {}) {
   const id = await session.callKw("res.config.settings", "create", [values]);
   return session.callButton("res.config.settings", "action_o3p_mcp_check_health", [id]);
@@ -568,7 +581,7 @@ async function scenario8() {
     return `"${message}"`;
   });
   await check("8b", "Check MCP server reports an unreachable URL (negative control, settings unchanged)", async () => {
-    const action = await pressHealth(admin, { o3p_mcp_resource_url: "http://localhost:18768/mcp" });
+    const action = await pressHealth(admin, { o3p_mcp_resource_url: `http://localhost:${await unusedPort()}/mcp` });
     assert(action.params.type === "danger" && /could not be reached/.test(action.params.message), `${action.params.type}: ${action.params.message}`);
     const again = await pressHealth(admin);
     assert(again.params.type === "success", "the configured URL changed");

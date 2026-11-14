@@ -3,7 +3,8 @@
 # the Odoo data tools of okf-odoo and permission-scoped SQL (plan steps C8,
 # D4 and E4).
 #
-# Usage: e2e/run.sh [--only 1,2,9,d]
+# Usage: OKF_MCP_DIR=<okf-mcp checkout> OKF_ODOO_DIR=<okf-odoo checkout> e2e/run.sh [--only 1,2,9,d,e]
+#        OKF_MCP_VERSION=<version> OKF_ODOO_VERSION=<version> e2e/run.sh
 #
 # 1. Starts PostgreSQL 17, a second PostgreSQL 17 instance as the SQL sandbox
 #    (the addon's scripts/sandbox-init.sh and sandbox-setup.sql), Odoo 20 with
@@ -25,8 +26,10 @@
 #
 # E2E_KEEP=1 keeps the stack and the setup files (in e2e/.work); then
 # E2E_REUSE=1 runs the scenarios again on that stack without rebuilding it.
-# okf-mcp and okf-odoo come from the package.json dependencies (paths to
-# checkouts with their dependencies installed); OKF_MCP_DIR overrides okf-mcp.
+# okf-mcp and okf-odoo: OKF_MCP_DIR / OKF_ODOO_DIR name a checkout with its
+# dependencies installed (npm ci), or OKF_MCP_VERSION / OKF_ODOO_VERSION a
+# published version of @mfdaves/okf-mcp / @mfdaves/okf-odoo, installed at run
+# time into e2e/.deps. A directory wins over a version.
 # Ports: E2E_ODOO_PORT (18069, the issuer), E2E_ODOO_INTERNAL_PORT (18070),
 # E2E_DB_PORT (15432), E2E_SANDBOX_PORT (15433), E2E_MCP_PORT (18766),
 # E2E_MCP2_PORT (18767). O3P_SQL_PASSWORD sets the sandbox roles' password.
@@ -57,6 +60,30 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Prints the directory of package $1 from the directory variable $2 or the
+# version variable $3, installing a published version into e2e/.deps.
+package_dir() {
+    local name=$1 dir=${!2:-} version=${!3:-}
+    if [ -n "$dir" ]; then
+        dir=$(cd "$dir" && pwd)
+        if [ ! -f "$dir/package.json" ] || [ ! -d "$dir/node_modules" ]; then
+            echo "$2=$dir is not a $name checkout with its dependencies installed (run npm ci there)" >&2
+            return 1
+        fi
+        printf '%s\n' "$dir"
+    elif [ -n "$version" ]; then
+        local prefix="$here/.deps/${name//[@\/]/_}-$version"
+        if [ ! -f "$prefix/node_modules/$name/package.json" ]; then
+            mkdir -p "$prefix"
+            npm install --prefix "$prefix" --no-audit --no-fund "$name@$version" >&2
+        fi
+        printf '%s\n' "$prefix/node_modules/$name"
+    else
+        echo "Set $2 (a checkout of $name) or $3 (a published version); see e2e/README.md" >&2
+        return 1
+    fi
+}
+
 step() { printf '\n== %s\n' "$*"; }
 seconds() { echo $(( $(date +%s%N) / 1000000 )); }
 shell() {
@@ -66,7 +93,12 @@ shell() {
 }
 
 cd "$here"
-[ -d node_modules ] || npm install --no-audit --no-fund
+[ -d node_modules ] || npm ci --no-audit --no-fund
+OKF_MCP_DIR=$(package_dir @mfdaves/okf-mcp OKF_MCP_DIR OKF_MCP_VERSION)
+OKF_ODOO_DIR=$(package_dir @mfdaves/okf-odoo OKF_ODOO_DIR OKF_ODOO_VERSION)
+export OKF_MCP_DIR OKF_ODOO_DIR
+echo "okf-mcp $(node -p "require('$OKF_MCP_DIR/package.json').version") from $OKF_MCP_DIR"
+echo "okf-odoo $(node -p "require('$OKF_ODOO_DIR/package.json').version") from $OKF_ODOO_DIR"
 
 if [ "${E2E_REUSE:-0}" = 1 ]; then
     step "Reusing the kept stack"

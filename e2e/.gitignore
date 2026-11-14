@@ -1,4 +1,5 @@
 node_modules/
 .work/
+.deps/
 # The repository root ignores lib/ (Python template); the test helpers live there.
 !lib/

@@ -2,7 +2,7 @@
   "name": "o3p-mcp-e2e",
   "version": "0.0.0",
   "private": true,
-  "description": "End-to-end check of o3p_mcp (Odoo 20) with okf-mcp over Streamable HTTP.",
+  "description": "End-to-end check of o3p_mcp (Odoo 20) with okf-mcp and okf-odoo over Streamable HTTP.",
   "type": "module",
   "license": "LGPL-3.0-only",
   "engines": {
@@ -13,8 +13,6 @@
     "suite": "node suite.mjs"
   },
   "dependencies": {
-    "@mfdaves/okf-mcp": "file:../../../okf/okf-mcp-e2e",
-    "@mfdaves/okf-odoo": "file:../../../okf/okf-odoo-e2e",
     "@modelcontextprotocol/client": "2.0.0"
   }
 }
