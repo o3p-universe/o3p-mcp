@@ -553,25 +553,75 @@ at once in Odoo (the MCP server may cache an answer for up to a minute).
 
 ## Connecting an MCP client
 
+The MCP server is [okf-mcp](https://github.com/mfdaves/okf-mcp)
+0.13.0-rc.1 or newer, which serves MCP over HTTP and checks every token
+through Odoo. The Odoo data tools come from the
+[okf-odoo](https://github.com/mfdaves/okf-odoo) tool pack, which calls the
+data API below. Both are on npm; the okf-mcp versions with HTTP are
+published under the `next` tag.
+
 1. Install the addon and give users the **MCP / User** or **MCP / Editor**
    group.
 2. In **Settings › MCP**, check the issuer, enter the MCP server URL and
    create the introspection credentials.
-3. Configure the MCP server with Odoo as its authorization server: the
-   issuer shown in the settings, the introspection URL, the introspection
-   client ID and secret, and a public URL equal to the MCP server URL. With
-   okf-mcp:
+3. In the directory of the okf project, install okf-mcp and the tool pack
+   (okf-mcp loads tool packs only from the project's `node_modules`):
 
    ```sh
-   OKF_INTROSPECTION_CLIENT_ID=c_… OKF_INTROSPECTION_CLIENT_SECRET=… \
-   okf mcp --http --public-url https://mcp.example.com/mcp \
+   npm install @mfdaves/okf-mcp@next @mfdaves/okf-odoo
+   ```
+
+4. Write `okf.project.yaml` there, with at least one knowledge bundle and the
+   tool pack. The tool pack's `url` is the Odoo server: `https`, or `http`
+   for a loopback host such as Odoo on the same machine.
+
+   ```yaml
+   project: Example
+   bundles:
+     - id: company
+       root: knowledge
+   toolPacks:
+     - package: "@mfdaves/okf-odoo"
+       config:
+         url: https://odoo.example.com
+         clientIdEnv: O3P_MCP_CLIENT_ID
+         clientSecretEnv: O3P_MCP_CLIENT_SECRET
+   ```
+
+5. Start okf-mcp with Odoo as its authorization server: the issuer shown in
+   the settings, the introspection URL, and a public URL equal to the MCP
+   server URL. okf-mcp (for introspection) and the tool pack (for the data
+   API) both authenticate with the introspection client ID and secret, each
+   from its own environment variables:
+
+   ```sh
+   export OKF_INTROSPECTION_CLIENT_ID=c_… OKF_INTROSPECTION_CLIENT_SECRET=…
+   export O3P_MCP_CLIENT_ID="$OKF_INTROSPECTION_CLIENT_ID"
+   export O3P_MCP_CLIENT_SECRET="$OKF_INTROSPECTION_CLIENT_SECRET"
+   npx okf --project okf.project.yaml mcp --http \
+     --public-url https://mcp.example.com/mcp \
      --authorization-server https://odoo.example.com \
      --auth introspect:https://odoo.example.com/o3p_mcp/oauth/introspect
    ```
 
-4. Add the MCP server URL to the MCP client. The client reads the server's
+   okf-mcp listens on `127.0.0.1:8766` (`--host` and `--port` change it); a
+   reverse proxy publishes it at the MCP server URL. Its protected-resource
+   metadata then lists the scopes `odoo.read` and `odoo.sql` next to
+   `okf.read` and `okf.write`.
+
+6. Add the MCP server URL to the MCP client. The client reads the server's
    protected-resource metadata, discovers Odoo, registers itself, opens the
    Odoo sign-in page and asks the user for consent.
+
+A signed-in user then has, next to the knowledge tools, `odoo_find_models`,
+`odoo_describe_model`, `odoo_search`, `odoo_read` and `odoo_group` (scope
+`odoo.read`) and `odoo_sql` (scope `odoo.sql`), each running as that user
+through the data API. `odoo_sql` needs the SQL sandbox (see SQL sandbox
+setup); without one it answers `unavailable`. The data tools are offered only
+over HTTP to a signed-in user. okf-odoo also has a producer that writes
+Odoo's modules, models, fields, groups and menus as an `odoo` knowledge
+bundle, to which the tools' descriptions point agents; it reads Odoo with an
+API key of its own (see the okf-odoo README).
 
 ### okf-mcp options
 

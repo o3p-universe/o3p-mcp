@@ -37,7 +37,7 @@ OKF_MCP_DIR=/path/to/okf-mcp OKF_ODOO_DIR=/path/to/okf-odoo e2e/run.sh
 With published versions, installed at run time into `e2e/.deps`:
 
 ```sh
-OKF_MCP_VERSION=0.13.0 OKF_ODOO_VERSION=0.1.0 e2e/run.sh
+OKF_MCP_VERSION=0.13.0-rc.1 OKF_ODOO_VERSION=0.1.2 e2e/run.sh
 ```
 
 `--only` selects scenarios (`1`–`9` for C8, `d` for D4, `e` for E4); the
