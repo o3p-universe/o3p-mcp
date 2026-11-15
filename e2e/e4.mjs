@@ -315,15 +315,23 @@ export async function runE4(ctx) {
     return `truncated at 1000 rows; 1.5 MB → result_too_large; over-long query → ${long.code}`;
   });
 
-  await check("E14", "Three concurrent queries of one user: the third is refused (429); five users at once exceed the four sandbox roles", async () => {
+  await check("E14", "Concurrent queries: the data API refuses a user's third query and a fifth user beyond the four sandbox roles (429); through okf-mcp the refused queries wait for a free slot and complete", async () => {
     const slow = "SELECT count(*), pg_sleep(2) FROM sale_order";
-    const own = await Promise.all([0, 1, 2].map(() => sql(A, slow)));
-    const codes = own.map((answer) => (answer.ok ? "ok" : answer.code));
-    assert(codes.filter((code) => code === "ok").length === 2 && codes.includes("too_many_requests"), `one user: ${codes.join(",")}`);
-    const many = await Promise.all(keys.map((key) => sql(sessions[key].client, key === "mcp_only" ? "SELECT pg_sleep(2)" : slow)));
-    const manyCodes = many.map((answer) => (answer.ok ? "ok" : answer.code));
-    assert(manyCodes.filter((code) => code === "ok").length === 4 && manyCodes.includes("too_many_requests"), `five users: ${manyCodes.join(",")}`);
-    return `one user ${codes.join(",")}; five users ${manyCodes.join(",")}`;
+    const queryOf = (key) => (key === "mcp_only" ? "SELECT pg_sleep(2)" : slow);
+    const codeOf = (answer) => (answer.status === 200 ? "ok" : answer.body?.error?.code || String(answer.status));
+    const own = (await Promise.all([0, 1, 2].map(() => direct("sql", sessions.sp_a.tokens.access_token, { query: slow })))).map(codeOf);
+    assert(own.filter((code) => code === "ok").length === 2 && own.includes("too_many_requests"), `data API, one user: ${own.join(",")}`);
+    const many = (await Promise.all(keys.map((key) => direct("sql", sessions[key].tokens.access_token, { query: queryOf(key) })))).map(codeOf);
+    assert(many.filter((code) => code === "ok").length === 4 && many.includes("too_many_requests"), `data API, five users: ${many.join(",")}`);
+    // okf-odoo waits for a free slot and sends a refused query again.
+    const viaMcp = await Promise.all([0, 1, 2].map(() => sql(A, slow)));
+    const mcpCodes = viaMcp.map((answer) => (answer.ok ? "ok" : answer.code));
+    const slowest = Math.max(...viaMcp.map((answer) => answer.ms));
+    assert(mcpCodes.every((code) => code === "ok"), `okf-mcp, one user: ${mcpCodes.join(",")}`);
+    assert(slowest >= 3500, `okf-mcp, one user: the third query did not wait for a slot (slowest ${Math.round(slowest)} ms)`);
+    const manyMcp = (await Promise.all(keys.map((key) => sql(sessions[key].client, queryOf(key))))).map((answer) => (answer.ok ? "ok" : answer.code));
+    assert(manyMcp.every((code) => code === "ok"), `okf-mcp, five users: ${manyMcp.join(",")}`);
+    return `data API: one user ${own.join(",")}, five users ${many.join(",")}; okf-mcp: one user ${mcpCodes.join(",")} (slowest ${(slowest / 1000).toFixed(1)} s), five users ${manyMcp.join(",")}`;
   });
 
   await check("E15", "Long-running queries stop at the time limit (here lowered to 3 s), also after raising statement_timeout", async () => {
