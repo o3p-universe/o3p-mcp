@@ -30,6 +30,8 @@ SCOPES = tuple(SCOPE_GROUPS)
 # Asked for by clients that want refresh tokens; refresh tokens are always
 # issued, so it is accepted and otherwise ignored.
 SCOPE_OFFLINE = "offline_access"
+# The most audiences an introspection answer names.
+MAX_AUDIENCES = 64
 
 CLIENT_AUTH_METHODS = ("none", "client_secret_post", "client_secret_basic")
 GRANT_TYPES = ("authorization_code", "refresh_token")
@@ -317,6 +319,24 @@ class O3pMcpOauth(models.AbstractModel):
             scope for scope, group in SCOPE_GROUPS.items() if user.has_group(group)
         }
         return scopes if SCOPE_READ in scopes else set()
+
+    @api.model
+    def _audiences_for_user(self, user):
+        """Return the codes of the audiences ``user`` belongs to now, sorted.
+
+        A user belongs to an active audience through any of its groups, held
+        directly or through another group. A user without MCP scopes belongs
+        to none.
+        """
+        user = user.sudo()
+        if not self._scopes_for_user(user):
+            return []
+        audiences = (
+            self.env["o3p.mcp.audience"]
+            .sudo()
+            .search([("group_ids", "in", user.all_group_ids.ids)])
+        )
+        return sorted(audiences.mapped("code"))[:MAX_AUDIENCES]
 
     @api.model
     def _resource_url(self):

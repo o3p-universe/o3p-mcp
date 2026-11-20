@@ -3,3 +3,4 @@ access_o3p_mcp_client_system,o3p.mcp.client system,o3p.mcp.client,base.group_sys
 access_o3p_mcp_code_system,o3p.mcp.code system,o3p.mcp.code,base.group_system,crud,
 access_o3p_mcp_token_system,o3p.mcp.token system,o3p.mcp.token,base.group_system,crud,
 access_o3p_mcp_api_log_system,o3p.mcp.api.log system,o3p.mcp.api.log,base.group_system,crud,
+access_o3p_mcp_audience_system,o3p.mcp.audience system,o3p.mcp.audience,base.group_system,crud,

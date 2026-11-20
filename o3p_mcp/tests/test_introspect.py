@@ -2,6 +2,7 @@ import json
 import time
 from pathlib import Path
 
+from odoo import Command
 from odoo.tests import tagged
 
 from .common import REDIRECT_URI, RESOURCE, LogCapture
@@ -62,6 +63,7 @@ class TestIntrospection(O3pMcpResourceServerCase):
         self.assertEqual(answer["name"], self.editor.name)
         self.assertEqual(answer["email"], self.editor.email)
         self.assertEqual(answer["scope"], "okf.read okf.write")
+        self.assertEqual(answer["audiences"], [])
         self.assertEqual(answer["aud"], RESOURCE)
         self.assertGreater(answer["exp"], time.time())
         self.assertLessEqual(answer["exp"], time.time() + 3600)
@@ -139,6 +141,53 @@ class TestIntrospection(O3pMcpResourceServerCase):
         self.assertEqual(
             self.answer(tokens["access_token"])["scope"], "okf.read odoo.read odoo.sql"
         )
+
+    def test_audiences_follow_the_users_groups(self):
+        Audience = self.env["o3p.mcp.audience"]
+        tokens = self.tokens_for()
+
+        def audiences():
+            return self.answer(tokens["access_token"])["audiences"]
+
+        self.assertEqual(audiences(), [])
+        staff = Audience.create(
+            {
+                "name": "Staff",
+                "code": "staff",
+                "group_ids": [Command.link(self.env.ref("base.group_user").id)],
+            }
+        )
+        Audience.create(
+            {
+                "name": "Knowledge editors",
+                "code": "editors",
+                "group_ids": [Command.link(self.editor_group.id)],
+            }
+        )
+        Audience.create(
+            {
+                "name": "Administrators",
+                "code": "admins",
+                "group_ids": [Command.link(self.env.ref("base.group_system").id)],
+            }
+        )
+        Audience.create({"name": "Nobody", "code": "nobody"})
+        # Sorted codes of the audiences whose groups the user holds.
+        self.assertEqual(audiences(), ["editors", "staff"])
+        # A group held through another group counts: MCP / Editor implies User.
+        Audience.create(
+            {"name": "MCP users", "code": "mcp", "group_ids": [Command.link(self.user_group.id)]}
+        )
+        self.assertEqual(audiences(), ["editors", "mcp", "staff"])
+        # A lost group and an archived audience are gone at the next call.
+        self.demote_to_reader(self.editor)
+        self.assertEqual(audiences(), ["mcp", "staff"])
+        staff.active = False
+        self.assertEqual(audiences(), ["mcp"])
+        # Without MCP access the token is inactive, whatever the audiences.
+        staff.active = True
+        self.remove_mcp_access(self.editor)
+        self.assertEqual(self.answer(tokens["access_token"]), INACTIVE)
 
     def test_editor_group_removed(self):
         tokens = self.tokens_for()
