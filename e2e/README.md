@@ -73,3 +73,30 @@ stack and its volumes are removed at the end.
 | `O3P_SQL_PASSWORD` | `o3p-sql-e2e` | Password of the sandbox roles |
 | `E2E_KEEP` | 0 | `1` keeps the stack and its setup files in `e2e/.work` |
 | `E2E_REUSE` | 0 | `1` reruns the scenarios on a kept stack |
+
+## Lab
+
+`lab/` keeps the stack of `run.sh` running, so that several clients can act
+as different Odoo users at the same time, and judges what each of them
+received.
+
+```sh
+OKF_MCP_VERSION=0.13.0-rc.1 OKF_ODOO_VERSION=0.1.2 e2e/lab/lab.sh up   # stays in the foreground
+node e2e/lab/call.mjs --as sp_a odoo_search '{"model":"sale.order","domain":[],"fields":["name"]}'
+node e2e/lab/check.mjs
+e2e/lab/lab.sh down
+```
+
+| File | Purpose |
+|---|---|
+| `lab.sh` | `up` starts the stack, plants the canaries and serves; `stack` and `serve` are its two halves; `down` removes the stack and `e2e/.work` |
+| `plant.py` | Run in `odoo shell`: writes canaries, random strings in places some users must never read (the orders of another salesperson, a hidden model), with the users allowed to see each |
+| `up.mjs` | Builds the okf project, starts okf-mcp and signs every test user in through the OAuth flow; the users without the MCP group and the portal user get no token |
+| `call.mjs` | One MCP call as a test user: `--as <user>`, then `--list`, `--schema <tool>` or `<tool> '<JSON arguments>'`. Prints the answer and appends the call with its complete answer to `e2e/.work/lab/transcripts/<LAB_RUN>/<agent>.<user>.jsonl` (`--agent` names the caller, `LAB_RUN` the run) |
+| `oracle.mjs` | The verdict of a run from its transcripts: `LEAK` when an answer to a user contains a canary, or a secret of the installation, that user may not see; `UNPROVEN` when no allowed user read a canary; else `CLEAN`. Exits non-zero unless clean |
+| `check.mjs` | The lab's own check: an owner reads the canary, another salesperson and a hidden model do not give it, six users calling at once each get the orders the ORM gives them, and the oracle tells the clean run from a leak |
+| `users.workflow.js` | A Claude Code workflow: one agent per test user does that user's ordinary work through `call.mjs` (sales questions as two salespeople and their manager, a knowledge note as an editor). Its answers are compared with `sales.json` and the run is judged by `oracle.mjs` |
+
+The test users are those of `setup.py` and `setup_sales.py`: `sp_a` and
+`sp_b` (salespeople who see their own orders), `manager`, `d_admin`,
+`editor`, `editor2`, `user` and `mcp_only`.
