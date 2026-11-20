@@ -19,6 +19,7 @@ The addon adds an **MCP** privilege with two groups:
 | `okf.write` | Live write tools and producer runs on the knowledge base |
 | `odoo.read` | Reading Odoo records through the data API, with the user's own rights |
 | `odoo.sql` | Running read-only SQL through the data API on the rows the user may read |
+
 Only active internal users hold scopes: archived users, portal and public
 users (even when placed in an MCP group) and users without the User group
 hold none.
@@ -258,7 +259,6 @@ text.
 |---|---|---|
 | `models` | `query` (optional, matched on the technical and the display name), `limit` (1–50, default 50), `offset` (optional, 0–10000) | `{ "models": [{ "model", "name" }], "total", "truncated" }`: the models the user may read, sorted by technical name; `total` counts all that match, `truncated` tells whether more follow |
 | `describe` | `model` | `{ "model", "name", "table", "fields": [{ "name", "string", "type", "relation"?, "required", "readonly", "stored", "searchable", "sortable", "groupable", "selection"?, "help"? }] }`: the fields the user may read; `table` is the database table or view of the model, `null` when it is computed from a query; `stored` tells whether the field has a column of its own (one2many and many2many have none), `searchable`, `sortable` and `groupable` whether domains, `order` and `groupby` accept it for this user |
-
 | `search` | `model`, `domain`, `fields`, `order`?, `limit` (1–200, default 80), `offset`? (0–1000000) | `{ "records", "count", "truncated" }` |
 | `read` | `model`, `ids` (1–100), `fields` | `{ "records" }` |
 | `group` | `model`, `domain`, `groupby` (1–5), `aggregates` (1–20), `order`?, `limit` (1–500, default 80) | `{ "groups": [{ <groupby and aggregate keys> }] }` |
