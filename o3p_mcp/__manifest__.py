@@ -1,13 +1,14 @@
 {
     "name": "o3p - mcp",
-    "summary": "OAuth 2.1 sign-in and a read-only data API for an external MCP server.",
+    "summary": "OAuth 2.1 sign-in and a data API for an external MCP server.",
     "description": (
         "O3P MCP lets Odoo users sign in to an external MCP server: Odoo issues "
         "and introspects OAuth 2.1 access tokens whose scopes follow the user's "
-        "MCP groups. The MCP server reads Odoo records, and runs read-only SQL "
-        "in a separate PostgreSQL sandbox, with the rights of the signed-in user."
+        "MCP groups. The MCP server reads Odoo records, runs read-only SQL in a "
+        "separate PostgreSQL sandbox and, on the models an administrator opens, "
+        "creates and updates records, all with the rights of the signed-in user."
     ),
-    "version": "20.0.1.44.0",
+    "version": "20.0.1.44.1",
     "category": "Technical",
     "author": "O3P",
     "website": "https://github.com/o3p-universe/o3p-mcp",
