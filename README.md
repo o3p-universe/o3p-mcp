@@ -42,6 +42,22 @@ Only active internal users hold scopes: archived users, portal and public
 users (even when placed in an MCP group) and users without the User group
 hold none.
 
+## Audiences
+
+An audience (**Settings › Technical › MCP › Audiences**) is a named set of
+Odoo groups whose users may read the same knowledge: a `code` (a lowercase
+letter, then lowercase letters, digits, `-` or `_`, at most 32 characters),
+a name and the groups. A user belongs to an audience when holding any of
+its groups, directly or through another group. Only users who may sign in
+belong to audiences.
+
+Token introspection names the user's audiences, sorted by code, at most 64.
+They are read from the user's current groups at every call, so a changed
+group or an archived audience shows at the next introspection. The MCP
+server serves each knowledge bundle to the audiences its project file names
+for it, and to every signed-in user when it names none. okf-mcp
+0.13.0-rc.1 and older ignore the field and serve every bundle to everyone.
+
 ## Clients, codes and tokens
 
 - **Clients** (`o3p.mcp.client`) are MCP clients, public (no secret) or
@@ -190,13 +206,15 @@ resource-server client. Missing or wrong credentials get HTTP 401 with
 ```json
 { "active": true, "sub": "42", "username": "jdoe", "name": "Jane Doe",
   "email": "jdoe@example.com", "scope": "okf.read okf.write odoo.read odoo.sql",
+  "audiences": ["hr"],
   "aud": "https://mcp.example.com/mcp", "exp": 1794000000, "client_id": "c_…" }
 ```
 
 `sub` is the Odoo user ID, `username` the login, `aud` the configured MCP
 URL, `exp` the access token expiry (seconds since the epoch) and `client_id`
 the MCP client the token was issued to. `scope` is recomputed from the user's
-current groups at every call. `email` is left out when the user has none.
+current groups at every call, and so is `audiences`, the codes of the
+audiences the user belongs to (an empty list when there are none). `email` is left out when the user has none.
 Every other case (unknown, expired, revoked, refresh token, archived user or
 client, user without the MCP User group) answers exactly
 `{ "active": false }`.
@@ -629,6 +647,8 @@ host and the SSL mode is weaker than `verify-full`.
   their redirect URIs (one per line, same rules as registration),
   authentication method, registration address and last use. Archiving a
   client deactivates its tokens; **Revoke all tokens** revokes them.
+- **Audiences**: the audiences, with their groups and the number of users
+  in them.
 - **API Calls**: the data API call log (read-only).
 - **Tokens**: issued tokens with user, client, scope, state (active,
   rotated, expired, revoked) and times. **Revoke**, on a token or on a

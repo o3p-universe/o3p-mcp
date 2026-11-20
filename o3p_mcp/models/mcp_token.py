@@ -296,6 +296,9 @@ class O3pMcpToken(models.Model):
             "name": user.name,
             "email": user.email,
             "scope": scope_string(scopes),
+            # The audiences the user belongs to now: what knowledge the MCP
+            # server lets the user read (see o3p.mcp.audience).
+            "audiences": self.env["o3p.mcp.oauth"]._audiences_for_user(user),
             "aud": token.resource,
             "exp": _epoch(token.expires_at),
             "client_id": token.client_id.client_id,

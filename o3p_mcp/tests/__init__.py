@@ -15,3 +15,4 @@ from . import test_api_hidden_on_read
 from . import test_api_relations
 from . import test_api_details
 from . import test_api_write
+from . import test_audience

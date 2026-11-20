@@ -68,6 +68,7 @@ class TestTokens(O3pMcpCommon, TransactionCase):
                 "name": "MCP Editor",
                 "email": self.editor.email,
                 "scope": "okf.read okf.write",
+                "audiences": [],
                 "aud": RESOURCE,
                 "exp": int(token.expires_at.replace(tzinfo=timezone.utc).timestamp()),
                 "client_id": self.client.client_id,
