@@ -276,10 +276,13 @@ text.
 | `describe` | `model` | `{ "model", "name", "table", "fields": [{ "name", "string", "type", "relation"?, "required", "readonly", "stored", "searchable", "sortable", "groupable", "selection"?, "help"? }] }`: the fields the user may read; `table` is the database table or view of the model, `null` when it is computed from a query; `stored` tells whether the field has a column of its own (one2many and many2many have none), `searchable`, `sortable` and `groupable` whether domains, `order` and `groupby` accept it for this user |
 | `search` | `model`, `domain`, `fields`, `order`?, `limit` (1–200, default 80), `offset`? (0–1000000) | `{ "records", "count", "truncated" }` |
 | `read` | `model`, `ids` (1–100), `fields` | `{ "records" }` |
-| `group` | `model`, `domain`, `groupby` (1–5), `aggregates` (1–20), `order`?, `limit` (1–500, default 80) | `{ "groups": [{ <groupby and aggregate keys> }] }` |
+| `group` | `model`, `domain`, `groupby`? (0–5), `aggregates` (1–20), `order`?, `limit` (1–500, default 80) | `{ "groups": [{ <groupby and aggregate keys> }] }` |
+| `context` | none | `{ "user": { "id", "name", "login" }, "lang", "tz", "company": { "id", "name" }, "companies": [{ "id", "name" }], "now", "today" }`: the signed-in user, the language and time zone answers come in, the user's default company and all the user's companies, the current time in UTC and today's date in the user's time zone |
 
 `group` runs Odoo's grouped read as the user, so counts and totals cover
-only the records the user may read; it never adds empty groups. Group
+only the records the user may read; it never adds empty groups. Without
+`groupby`, or with an empty list, the answer is one group: the totals over
+every record the domain finds for the user. Group
 values come as in the web client: `[id, name]` for relations,
 `[start, label]` for dates. `models` never lists transient, abstract or
 hidden models. Records come in

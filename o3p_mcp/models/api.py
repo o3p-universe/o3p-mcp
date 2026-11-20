@@ -230,6 +230,7 @@ class O3pMcpApi(models.AbstractModel):
             {"model", "domain", "groupby", "aggregates", "order", "limit"},
         ),
         "sql": ("_op_sql", SCOPE_ODOO_SQL, {"query", "limit"}),
+        "context": ("_op_context", SCOPE_ODOO_READ, set()),
     }
 
     # ------------------------------------------------------------------
@@ -646,9 +647,13 @@ class O3pMcpApi(models.AbstractModel):
         return ", ".join(items)
 
     def _groupby_param(self, model, value):
+        # No groupby (left out, or an empty list) asks for one group: the
+        # totals over every record the domain finds for the user.
+        if value is None:
+            return []
         if (
             not isinstance(value, list)
-            or not 0 < len(value) <= MAX_GROUPBY
+            or len(value) > MAX_GROUPBY
             or not all(isinstance(spec, str) for spec in value)
         ):
             raise invalid("bad_value", "groupby", message=MSG_GROUPBY)
@@ -916,3 +921,26 @@ class O3pMcpApi(models.AbstractModel):
 
             return format_period
         return lambda value: value
+
+    def _op_context(self, params):
+        """Who the call runs as, and where and when: the user, the language
+        and time zone answers come in, the companies, the current time.
+
+        Everything is the user's own: nothing here depends on access rights.
+        """
+        user = self.env.user
+        tz = user.tz or "UTC"
+        result = {
+            "user": {"id": user.id, "name": user.name, "login": user.login},
+            "lang": user.lang or "en_US",
+            "tz": tz,
+            "company": {"id": user.company_id.id, "name": user.company_id.name},
+            "companies": [
+                {"id": company.id, "name": company.name} for company in user.company_ids
+            ],
+            "now": fields.Datetime.to_string(fields.Datetime.now()),
+            "today": fields.Date.to_string(
+                fields.Date.context_today(self.with_context(tz=tz))
+            ),
+        }
+        return result, None, 1
