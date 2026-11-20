@@ -20,6 +20,7 @@ from .denylist import (  # noqa: F401 - re-exported for callers of this module
 from .oauth import (
     SCOPE_ODOO_READ,
     SCOPE_ODOO_SQL,
+    SCOPE_ODOO_WRITE,
     SCOPE_READ,
     find_by_secret,
     parse_scope,
@@ -170,6 +171,13 @@ REASONS = {
     "bad_aggregate": "Use __count, field:sum|avg|min|max on stored numeric fields, or field:count|count_distinct on stored fields.",
     "granularity_required": "Append :day, :week, :month, :quarter or :year to a date field (or :hour to a datetime field).",
     "bad_granularity": "Only date and datetime fields take a granularity: day, week, month, quarter or year, and hour for datetimes.",
+    "model_not_writable": "The administrator has not opened this model for writing through MCP.",
+    "no_write_access": "The user may not create or change records of this model in Odoo.",
+    "no_record_access": "The user may not change one of these records in Odoo.",
+    "not_writable": "The field is read-only, computed, related, hidden or of a type that cannot be written; describe marks the writable fields.",
+    "unknown_record": "A record id does not exist or the user may not read it.",
+    "required_missing": "Give a value for this required field.",
+    "bad_company": "Use the id of one of the user's companies; the context operation (odoo_context) lists them.",
 }
 # Hints that replace no_model_access for some models.
 MODEL_HINTS = {
@@ -216,7 +224,11 @@ class O3pMcpApi(models.AbstractModel):
         ),
         "sql": ("_op_sql", SCOPE_ODOO_SQL, {"query", "limit"}),
         "context": ("_op_context", SCOPE_ODOO_READ, set()),
+        # The writing operations live in api_write.py.
+        "create": ("_op_create", SCOPE_ODOO_WRITE, {"model", "records", "company"}),
+        "update": ("_op_update", SCOPE_ODOO_WRITE, {"model", "ids", "values", "company"}),
     }
+    _WRITE_OPS = frozenset({"create", "update"})
 
     # ------------------------------------------------------------------
     # Configuration
@@ -307,6 +319,8 @@ class O3pMcpApi(models.AbstractModel):
         if unknown:
             raise invalid("unknown_param", unknown[0], message=MSG_KEYS)
         method = getattr(self, method_name)
+        if op in self._WRITE_OPS:
+            return self._run_write(method, params)
         self.env.flush_all()
         cr = self.env.cr
         cr.execute("SAVEPOINT o3p_mcp_api")
@@ -768,6 +782,7 @@ class O3pMcpApi(models.AbstractModel):
             attributes=["string", "type", "relation", "required", "readonly", "selection", "help"],
         )
         filterable = self._filterable_fields(model)
+        opened = self._model_writable(model._name)
         result_fields = []
         for name in sorted(descriptions):
             description = descriptions[name]
@@ -786,6 +801,8 @@ class O3pMcpApi(models.AbstractModel):
                 "searchable": usable and bool(field._description_searchable),
                 "sortable": usable and bool(field._description_sortable(model.env)),
                 "groupable": usable and bool(field._description_groupable(model.env)),
+                # Whether create and update take a value for it.
+                "writable": opened and self._field_writable(model, field),
             }
             if description.get("relation"):
                 item["relation"] = description["relation"]
@@ -798,6 +815,12 @@ class O3pMcpApi(models.AbstractModel):
             "model": model._name,
             "name": self._model_labels([model._name]).get(model._name) or model._description,
             "table": self._table_name(model),
+            # What the user may do through create and update: the model is
+            # opened for writing and Odoo gives the user the right.
+            "access": {
+                "create": opened and model.has_access("create"),
+                "write": opened and model.has_access("write"),
+            },
             "fields": result_fields,
         }
         return result, model._name, len(result_fields)

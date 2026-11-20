@@ -38,4 +38,20 @@
         <field name="privilege_id" ref="res_groups_privilege_mcp_sql"/>
         <field name="comment">With MCP / User, adds the odoo.sql scope: read-only SQL on the rows the user may read.</field>
     </record>
+
+    <!-- Changing records is a right of its own, like SQL: it adds odoo.write
+         for users who hold MCP / User and grants nothing without it. -->
+    <record id="res_groups_privilege_mcp_records" model="res.groups.privilege">
+        <field name="name">MCP records</field>
+        <field name="sequence">92</field>
+        <field name="category_id" ref="base.module_category_productivity"/>
+        <field name="description">Creating and changing Odoo records through the MCP server.</field>
+    </record>
+
+    <record id="group_mcp_record_editor" model="res.groups">
+        <field name="name">Editor</field>
+        <field name="sequence">10</field>
+        <field name="privilege_id" ref="res_groups_privilege_mcp_records"/>
+        <field name="comment">With MCP / User, adds the odoo.write scope: creating and changing records of the models opened in the settings, with the user's own rights.</field>
+    </record>
 </odoo>

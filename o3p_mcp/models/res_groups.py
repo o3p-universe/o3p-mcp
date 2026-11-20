@@ -12,4 +12,5 @@ class ResGroups(models.Model):
             "o3p_mcp.group_mcp_user",
             "o3p_mcp.group_mcp_editor",
             "o3p_mcp.group_mcp_sql",
+            "o3p_mcp.group_mcp_record_editor",
         )

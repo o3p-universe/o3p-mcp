@@ -31,8 +31,12 @@ def api_response(status, payload, headers=()):
     )
 
 
-def write_audit(values, token_id=None):
-    """Record the call; a failure to record never changes the answer."""
+def write_audit(values, token_id=None, strict=False):
+    """Record the call; a failure to record never changes the answer.
+
+    ``strict`` is for a call that wrote records: the failure is raised, so
+    that the caller undoes the write instead of committing it unrecorded.
+    """
     env = api.Environment(request.env.cr, SUPERUSER_ID, {})
     try:
         with env.cr.savepoint():
@@ -43,6 +47,8 @@ def write_audit(values, token_id=None):
                 if not token.last_used_at or now - token.last_used_at >= LAST_USED_RESOLUTION:
                     token.last_used_at = now
     except Exception as exc:  # noqa: BLE001 - the answer must not depend on the audit
+        if strict:
+            raise
         _logger.warning(
             "MCP data API: the call could not be recorded (%s)", type(exc).__name__
         )
@@ -55,8 +61,9 @@ class O3pMcpApiController(http.Controller):
         auth="none",
         methods=["POST"],
         csrf=False,
-        # The operation itself runs in a read-only subtransaction (see
+        # A reading operation runs in a read-only subtransaction (see
         # o3p.mcp.api._run); the request writes the audit row afterwards.
+        # A writing operation commits only together with its audit row.
         readonly=False,
         save_session=False,
         max_content_length=MAX_REQUEST_BYTES,
@@ -65,6 +72,10 @@ class O3pMcpApiController(http.Controller):
         started = time.monotonic()
         audit = {"op": op[:64], "row_count": 0}
         token_id = None
+        # Set once a writing operation has changed records: from then on any
+        # failure rolls the whole request back.
+        written = False
+        recorded = False
         try:
             # Odoo adds OPTIONS to every route; this one serves POST only.
             if request.httprequest.method != "POST":
@@ -95,19 +106,33 @@ class O3pMcpApiController(http.Controller):
                     request.env.context, lang=user.lang or "en_US", tz=user.tz or "UTC"
                 ),
             )
+            writes = op in Api._WRITE_OPS
             result, model, rows, *extra = request.env["o3p.mcp.api"]._run(
                 op, body.get("params", {})
             )
+            written = writes
             audit.update(model=model, row_count=rows)
             if extra and extra[0]:
-                audit["tables"] = ",".join(extra[0])
+                if writes:
+                    audit.update(extra[0])
+                else:
+                    audit["tables"] = ",".join(extra[0])
             payload = {"result": result}
             size = len(json.dumps(payload, ensure_ascii=False, default=json_default).encode())
             if size > request.env["o3p.mcp.api"]._max_response_bytes():
                 raise ApiError("result_too_large")
             audit["status"] = 200
+            if writes:
+                # No write commits without its row in the call log.
+                audit["duration_ms"] = int((time.monotonic() - started) * 1000)
+                write_audit(audit, token_id, strict=True)
+                recorded = True
             return api_response(200, payload)
         except ApiError as error:
+            if written:
+                request.env.cr.rollback()
+            for key in ("record_ids", "field_names"):
+                audit.pop(key, None)
             audit.update(status=error.status, error=error.code, row_count=0)
             if error.tables:
                 audit["tables"] = ",".join(error.tables)
@@ -120,15 +145,18 @@ class O3pMcpApiController(http.Controller):
             raise
         except Exception as exc:  # noqa: BLE001 - the contract's fixed answer, always recorded
             _logger.warning("MCP data API %s failed unexpectedly: %s", op, type(exc).__name__)
-            if isinstance(exc, psycopg2.Error):
-                # The transaction is aborted; start over to record the call.
+            if written or isinstance(exc, psycopg2.Error):
+                # The transaction is aborted, or holds a write that was not
+                # recorded: start over to record the call.
                 request.env.cr.rollback()
+            for key in ("record_ids", "field_names"):
+                audit.pop(key, None)
             error = ApiError("query_error")
             audit.update(status=error.status, error=error.code, row_count=0)
             return api_response(error.status, error.to_dict())
         finally:
-            audit["duration_ms"] = int((time.monotonic() - started) * 1000)
-            if "status" in audit:
+            if "status" in audit and not recorded:
+                audit["duration_ms"] = int((time.monotonic() - started) * 1000)
                 write_audit(audit, token_id)
 
     @staticmethod

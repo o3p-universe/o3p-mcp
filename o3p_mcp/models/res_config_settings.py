@@ -116,6 +116,11 @@ class ResConfigSettings(models.TransientModel):
         help="Field names the data API never exposes on any model, one pattern "
         "per line. Binary fields are always hidden.",
     )
+    o3p_mcp_api_writable_models = fields.Text(
+        string="Writable models",
+        help="Models whose records MCP record editors may create and change, one "
+        "pattern per line (* matches anything). Empty: nothing can be written.",
+    )
     o3p_mcp_api_max_response_kb = fields.Integer(
         string="Largest answer (KB)",
         default=DEFAULT_MAX_RESPONSE_BYTES // 1000,
@@ -232,6 +237,9 @@ class ResConfigSettings(models.TransientModel):
             o3p_mcp_api_denied_fields="\n".join(
                 patterns(params.get_str("o3p_mcp.api_denied_fields"), DEFAULT_DENIED_FIELDS)
             ),
+            o3p_mcp_api_writable_models="\n".join(
+                patterns(params.get_str("o3p_mcp.api_writable_models"), ())
+            ),
             o3p_mcp_api_max_response_kb=params.get_int(
                 "o3p_mcp.api_max_response_bytes", DEFAULT_MAX_RESPONSE_BYTES
             )
@@ -315,6 +323,10 @@ class ResConfigSettings(models.TransientModel):
         ):
             items = patterns(value, default)
             params.set_str(key, "" if items == tuple(default) else "\n".join(items))
+        params.set_str(
+            "o3p_mcp.api_writable_models",
+            "\n".join(patterns(self.o3p_mcp_api_writable_models, ())),
+        )
         params.set_int("o3p_mcp.api_max_response_bytes", self.o3p_mcp_api_max_response_kb * 1000)
         params.set_int("o3p_mcp.api_timeout_seconds", self.o3p_mcp_api_timeout_seconds)
         params.set_int("o3p_mcp.api_log_days", self.o3p_mcp_api_log_days)
