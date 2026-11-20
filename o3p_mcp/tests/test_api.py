@@ -180,6 +180,41 @@ class TestApiModels(O3pMcpApiCase):
         names = [item["model"] for item in self.result("models", {"query": "base"}, user="admin")["models"]]
         self.assertNotIn("base", names)
 
+    def test_context_tells_who_where_and_when(self):
+        company = self.restricted.company_id
+        self.restricted.write({"tz": "Europe/Rome", "lang": "en_US"})
+        result = self.result("context")
+        today = fields.Date.to_string(
+            fields.Date.context_today(self.restricted.with_context(tz="Europe/Rome"))
+        )
+        now = result.pop("now")
+        self.assertEqual(
+            result,
+            {
+                "user": {
+                    "id": self.restricted.id,
+                    "name": "Restricted User",
+                    "login": "o3p_mcp_restricted",
+                },
+                "lang": "en_US",
+                "tz": "Europe/Rome",
+                "company": {"id": company.id, "name": company.name},
+                "companies": [{"id": company.id, "name": company.name}],
+                "today": today,
+            },
+        )
+        self.assertRegex(now, r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
+        # The administrator gets the administrator's own answer.
+        self.assertEqual(self.result("context", user="admin")["user"]["id"], self.admin.id)
+        # It takes no parameter and needs odoo.read like every other read.
+        self.assertApiError(self.call("context", {"user": self.admin.id}), "invalid_params")
+        _token, response = self.env["o3p.mcp.token"]._issue(
+            self.client, self.restricted, {"okf.read"}, RESOURCE
+        )
+        self.assertApiError(
+            self.call("context", token=response["access_token"]), "insufficient_scope"
+        )
+
     def test_models_pages(self):
         first = self.result("models", {"limit": 50}, user="admin")
         self.assertEqual(set(first), {"models", "total", "truncated"})
@@ -617,6 +652,27 @@ class TestApiGroup(O3pMcpApiCase):
         admin = self.group(user="admin", groupby=["category_id"], aggregates=["__count"])["groups"]
         self.assertEqual(sum(group["__count"] for group in admin), 4)
 
+    def test_no_groupby_gives_one_group_of_totals(self):
+        for groupby in ({}, {"groupby": []}):
+            with self.subTest(groupby=groupby):
+                self.assertEqual(
+                    self.group(aggregates=["__count", "color:sum"], **groupby),
+                    {"groups": [{"__count": 2, "color:sum": 7}]},
+                )
+        self.assertEqual(
+            self.group(user="admin", aggregates=["__count", "color:sum"])["groups"],
+            [{"__count": 4, "color:sum": 307}],
+        )
+        # Totals of nothing are one group too, and the order takes aggregates only.
+        self.assertEqual(
+            self.result(
+                "group",
+                {"model": "res.partner", "domain": [["name", "=", "MCPT nobody"]], "aggregates": ["__count"]},
+            ),
+            {"groups": [{"__count": 0}]},
+        )
+        self.assertInvalid(aggregates=["__count"], order="type")
+
     def test_order_on_aggregates_and_limit(self):
         groups = self.group(
             user="admin", groupby=["name"], aggregates=["color:sum", "__count"],
@@ -638,7 +694,8 @@ class TestApiGroup(O3pMcpApiCase):
         self.assertEqual(groups[0]["name:count_distinct"], 2)
         self.assertEqual(len(groups[0]["create_date:month"]), 2)
         self.assertEqual(self.group(groupby=["create_date:hour"], aggregates=["__count"])["groups"][0]["__count"], 2)
-        for groupby in (["create_date"], ["name:month"], ["create_date:decade"], ["display_name"], ["nope"], [], "name", ["a", "b", "c", "d", "e", "f"]):
+        # An empty groupby is valid: one group of totals (see the test above).
+        for groupby in (["create_date"], ["name:month"], ["create_date:decade"], ["display_name"], ["nope"], "name", ["a", "b", "c", "d", "e", "f"]):
             with self.subTest(groupby=groupby):
                 self.assertInvalid(groupby=groupby, aggregates=["__count"])
 

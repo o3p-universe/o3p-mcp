@@ -94,7 +94,7 @@ e2e/lab/lab.sh down
 | `up.mjs` | Builds the okf project, starts okf-mcp and signs every test user in through the OAuth flow; the users without the MCP group and the portal user get no token |
 | `call.mjs` | One MCP call as a test user: `--as <user>`, then `--list`, `--schema <tool>` or `<tool> '<JSON arguments>'`. Prints the answer and appends the call with its complete answer to `e2e/.work/lab/transcripts/<LAB_RUN>/<agent>.<user>.jsonl` (`--agent` names the caller, `LAB_RUN` the run) |
 | `oracle.mjs` | The verdict of a run from its transcripts: `LEAK` when an answer to a user contains a canary, or a secret of the installation, that user may not see; `UNPROVEN` when no allowed user read a canary; else `CLEAN`. Exits non-zero unless clean |
-| `check.mjs` | The lab's own check: an owner reads the canary, another salesperson and a hidden model do not give it, six users calling at once each get the orders the ORM gives them, and the oracle tells the clean run from a leak |
+| `check.mjs` | The lab's own check: an owner reads the canary, another salesperson and a hidden model do not give it, six users calling at once each get the orders the ORM gives them, each user's context names that user and totals without a groupby equal the ORM's (both when the tool pack offers `odoo_context`), and the oracle tells the clean run from a leak |
 | `users.workflow.js` | A Claude Code workflow: one agent per test user does that user's ordinary work through `call.mjs` (sales questions as two salespeople and their manager, a knowledge note as an editor). Its answers are compared with `sales.json` and the run is judged by `oracle.mjs` |
 
 The test users are those of `setup.py` and `setup_sales.py`: `sp_a` and

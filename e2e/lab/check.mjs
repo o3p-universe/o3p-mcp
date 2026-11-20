@@ -18,6 +18,7 @@ const run = `check-${process.pid}`;
 const env = { ...process.env, LAB_RUN: run };
 const exec = promisify(execFile);
 const read = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
+const setup = read(path.join(WORK, "setup.json"));
 const sales = read(path.join(WORK, "sales.json"));
 const canaries = read(path.join(WORK, "canaries.json"));
 const orderCanary = canaries.find((entry) => entry.id === "order_ref_of_other_salesperson").value;
@@ -30,6 +31,16 @@ async function call(role, tool, args) {
     { env, maxBuffer: 16 * 1024 * 1024 },
   );
   return stdout;
+}
+
+// The names of the tools offered to `role`.
+async function offered(role) {
+  const { stdout } = await exec(
+    process.execPath,
+    [path.join(here, "call.mjs"), "--as", role, "--agent", "check", "--list"],
+    { env, maxBuffer: 16 * 1024 * 1024 },
+  );
+  return stdout.split("\n").map((line) => line.split(":")[0]);
 }
 
 // The oracle's verdict for this run, with the canaries of `file` if given.
@@ -97,6 +108,45 @@ await check("Six users calling at once each get their own rights", async () => {
   });
   return seen.join(", ");
 });
+
+// The checks below need the tool pack that offers odoo_context (okf-odoo
+// newer than 0.1.2) and o3p_mcp 1.42 or newer.
+if ((await offered("sp_a")).includes("odoo_context")) {
+  await check("Each user's context names that user, a time zone and the user's companies", async () => {
+    const roles = ["sp_a", "sp_b", "manager", "editor"];
+    const answers = await Promise.all(roles.map((role) => call(role, "odoo_context", {})));
+    return roles
+      .map((role, index) => {
+        const context = JSON.parse(answers[index]);
+        const user = sales.users[role] || setup.users[role];
+        assert(context.user.id === user.id && context.user.login === user.login, `${role}: ${answers[index].slice(0, 120)}`);
+        assert(context.companies.some((company) => company.id === context.company.id), `${role}: company not among the companies`);
+        assert(/^\d{4}-\d{2}-\d{2}$/.test(context.today) && context.tz, `${role}: ${context.today} ${context.tz}`);
+        return `${role} ${context.user.name} (${context.tz})`;
+      })
+      .join(", ");
+  });
+
+  await check("Totals without a groupby equal the ORM's for each user", async () => {
+    const roles = ["sp_a", "sp_b", "manager"];
+    const answers = await Promise.all(
+      roles.map((role) => call(role, "odoo_group", { model: "sale.order", aggregates: ["__count", "amount_total:sum"] })),
+    );
+    return roles
+      .map((role, index) => {
+        const truth = sales.truth[role];
+        const total = Object.values(truth.by_user).reduce((sum, [amount]) => sum + amount, 0);
+        const { groups } = JSON.parse(answers[index]);
+        assert(groups.length === 1, `${role}: ${groups.length} groups`);
+        assert(groups[0].__count === truth.order_ids.length, `${role}: ${groups[0].__count} orders, the ORM gives ${truth.order_ids.length}`);
+        assert(Math.abs(groups[0]["amount_total:sum"] - total) < 0.01, `${role}: ${groups[0]["amount_total:sum"]}, the ORM gives ${total}`);
+        return `${role} ${groups[0].__count} orders ${groups[0]["amount_total:sum"]}`;
+      })
+      .join(", ");
+  });
+} else {
+  console.log("SKIP  context and totals: this tool pack does not offer odoo_context");
+}
 
 await check("The oracle finds the run clean", async () => {
   const verdict = await oracle();
