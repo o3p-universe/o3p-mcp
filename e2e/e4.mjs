@@ -56,7 +56,7 @@ export async function runE4(ctx) {
 
   const sessions = {};
   const keys = ["sp_a", "sp_b", "manager", "d_admin", "mcp_only"];
-  await check("E1", "Every MCP user signs in with odoo.sql and is offered odoo_sql; the portal user gets no token", async () => {
+  await check("E1", "Every user with MCP SQL signs in with odoo.sql and is offered odoo_sql; the portal user gets no token", async () => {
     for (const key of keys) {
       const result = await ctx.signInAs(U[key].login);
       assert(result.outcome === "signed-in" && result.tokens.scope.split(" ").includes("odoo.sql"), `${key}: ${result.outcome} "${result.tokens?.scope}"`);
@@ -81,6 +81,19 @@ export async function runE4(ctx) {
     assert(!answer.ok, "the call ran");
     assert(api.status === 403 && api.body.error?.code === "insufficient_scope", `data API → ${api.status} ${json(api.body)}`);
     return `odoo_sql absent, call → ${answer.code}, data API → insufficient_scope`;
+  });
+
+  await check("E2b", "An MCP user without the MCP SQL group is granted no odoo.sql and is not offered odoo_sql", async () => {
+    const result = await ctx.signInAs(ctx.setup.users.editor2.login);
+    assert(result.outcome === "signed-in", `sign-in: ${result.outcome}`);
+    const scopes = result.tokens.scope.split(" ");
+    const tools = (await result.client.listTools()).tools.map((tool) => tool.name);
+    const api = await direct("sql", result.tokens.access_token, { query: "SELECT 1" });
+    await result.client.close();
+    assert(scopes.includes("odoo.read") && !scopes.includes("odoo.sql"), `granted "${result.tokens.scope}"`);
+    assert(!tools.includes("odoo_sql") && tools.includes("odoo_search"), `tools: ${tools.filter((n) => n.startsWith("odoo")).join(",")}`);
+    assert(api.status === 403 && api.body.error?.code === "insufficient_scope", `data API → ${api.status} ${json(api.body)}`);
+    return `granted "${result.tokens.scope}"; odoo_sql absent; data API → insufficient_scope`;
   });
 
   // -------------------------------------------------------------------------

@@ -7,7 +7,7 @@
         "MCP groups. The MCP server reads Odoo records, and runs read-only SQL "
         "in a separate PostgreSQL sandbox, with the rights of the signed-in user."
     ),
-    "version": "20.0.1.40.1",
+    "version": "20.0.1.41.0",
     "category": "Technical",
     "author": "O3P",
     "website": "https://github.com/o3p-universe/o3p-mcp",

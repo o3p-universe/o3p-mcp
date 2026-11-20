@@ -6,12 +6,22 @@ server checks every access token through Odoo's introspection endpoint.
 
 ## Groups and scopes
 
-The addon adds an **MCP** privilege with two groups:
+The addon adds an **MCP** privilege with two groups and an **MCP SQL**
+privilege with one. On the user form each privilege is a choice of its own:
+User or Editor for MCP, Allowed for MCP SQL, or none of them.
 
 | Group | Scopes granted |
 |---|---|
-| MCP / User | `okf.read`, `odoo.read`, `odoo.sql` |
+| MCP / User | `okf.read`, `odoo.read` |
 | MCP / Editor (implies User) | the User scopes and `okf.write` |
+| MCP SQL / Allowed | `odoo.sql`, for users who also hold MCP / User |
+
+MCP SQL / Allowed grants nothing by itself: removing MCP / User (or Editor,
+which implies it) ends every MCP right of a user in one step.
+
+Up to version 1.40 the User group granted `odoo.sql` too. Upgrading from
+such a version gives MCP SQL / Allowed to every internal user who holds
+MCP / User, so nobody loses SQL; new users get it only when it is assigned.
 
 | Scope | Allows |
 |---|---|
@@ -153,9 +163,9 @@ refused. Responses carry `Cache-Control: no-store`.
   and unknown scopes are ignored, a scope beyond the grant or without
   `okf.read` gets `invalid_scope` and leaves the refresh token usable) and
   `resource`. The user must still be
-  active and in the MCP groups: losing the Editor group narrows the new
-  token to `okf.read`, losing the User group refuses the refresh and revokes
-  the family.
+  active and in the MCP groups: losing the Editor group drops `okf.write`
+  from the new token, losing MCP SQL / Allowed drops `odoo.sql`, losing the
+  User group refuses the refresh and revokes the family.
 
 The response is `access_token`, `token_type` (`Bearer`), `expires_in`,
 `refresh_token` and `scope`. Errors follow RFC 6749 (`invalid_client` with
@@ -561,7 +571,7 @@ data API below. Both are on npm; the okf-mcp versions with HTTP are
 published under the `next` tag.
 
 1. Install the addon and give users the **MCP / User** or **MCP / Editor**
-   group.
+   group, and **MCP SQL / Allowed** to those who may run SQL.
 2. In **Settings › MCP**, check the issuer, enter the MCP server URL and
    create the introspection credentials.
 3. In the directory of the okf project, install okf-mcp and the tool pack
@@ -615,8 +625,9 @@ published under the `next` tag.
 
 A signed-in user then has, next to the knowledge tools, `odoo_find_models`,
 `odoo_describe_model`, `odoo_search`, `odoo_read` and `odoo_group` (scope
-`odoo.read`) and `odoo_sql` (scope `odoo.sql`), each running as that user
-through the data API. `odoo_sql` needs the SQL sandbox (see SQL sandbox
+`odoo.read`) and, with MCP SQL / Allowed, `odoo_sql` (scope `odoo.sql`),
+each running as that user through the data API. `odoo_sql` needs the SQL
+sandbox (see SQL sandbox
 setup); without one it answers `unavailable`. The data tools are offered only
 over HTTP to a signed-in user. okf-odoo also has a producer that writes
 Odoo's modules, models, fields, groups and menus as an `odoo` knowledge
@@ -734,3 +745,11 @@ what the ORM shows, and run the escape attempts of
 `o3p_mcp/tests/sql_attacks.py` (role switching, schema-qualified names,
 functions that run SQL, files, catalogs, several statements, timeouts and
 more): every attempt must fail and no answer may contain hidden data.
+
+`scripts/check-upgrade.sh <git ref> <before.py> <after.py>` checks an
+upgrade on a throw-away database with the same stack: it installs the addon
+as of the git ref, runs the first script in `odoo shell`, upgrades to the
+working tree and runs the second, which prints `UPGRADE OK` when what it
+expects holds. `scripts/upgrade/` holds the pairs; `sql-group-before.py` and
+`sql-group-after.py` check that the users who held MCP / User before 1.41
+keep `odoo.sql` and that nobody else receives it.

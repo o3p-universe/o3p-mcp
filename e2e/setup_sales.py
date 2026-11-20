@@ -31,13 +31,14 @@ system = ref("base.group_system")
 salesman = ref("sales_team.group_sale_salesman")
 sale_manager = ref("sales_team.group_sale_manager")
 mcp_user = ref("o3p_mcp.group_mcp_user")
+mcp_sql = ref("o3p_mcp.group_mcp_sql")
 
 Users = env["res.users"].with_context(no_reset_password=True)
 people = {
-    "sp_a": ("sara.vendite@example.test", "Sara Vendite", [internal, salesman, mcp_user]),
-    "sp_b": ("bruno.vendite@example.test", "Bruno Vendite", [internal, salesman, mcp_user]),
-    "manager": ("marta.capo@example.test", "Marta Capo", [internal, sale_manager, mcp_user]),
-    "d_admin": ("dario.admin@example.test", "Dario Admin", [internal, system, sale_manager, mcp_user]),
+    "sp_a": ("sara.vendite@example.test", "Sara Vendite", [internal, salesman, mcp_user, mcp_sql]),
+    "sp_b": ("bruno.vendite@example.test", "Bruno Vendite", [internal, salesman, mcp_user, mcp_sql]),
+    "manager": ("marta.capo@example.test", "Marta Capo", [internal, sale_manager, mcp_user, mcp_sql]),
+    "d_admin": ("dario.admin@example.test", "Dario Admin", [internal, system, sale_manager, mcp_user, mcp_sql]),
     "reader": ("okf.reader@example.test", "OKF Reader", [internal, system]),
 }
 users = {}
@@ -56,9 +57,11 @@ for key, (login, name, groups) in people.items():
     )
     records[key] = user
     users[key] = {"id": user.id, "login": login, "name": name}
-# The MCP user without sales rights is setup.py's "user".
+# The MCP user without sales rights is setup.py's "user"; here he runs SQL
+# too. setup.py's editors stay without the SQL group.
 mcp_only = env["res.users"].search([("login", "=", "ugo.user@example.test")])
 mcp_only.tz = TZ
+mcp_only.write({"group_ids": [Command.link(mcp_sql.id)]})
 records["mcp_only"] = mcp_only
 users["mcp_only"] = {"id": mcp_only.id, "login": mcp_only.login, "name": mcp_only.name}
 

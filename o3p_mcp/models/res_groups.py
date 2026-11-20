@@ -11,4 +11,5 @@ class ResGroups(models.Model):
             *super()._get_light_group_xmlids(),
             "o3p_mcp.group_mcp_user",
             "o3p_mcp.group_mcp_editor",
+            "o3p_mcp.group_mcp_sql",
         )
