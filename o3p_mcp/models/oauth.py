@@ -22,7 +22,7 @@ SCOPE_GROUPS = {
     SCOPE_READ: "o3p_mcp.group_mcp_user",
     SCOPE_WRITE: "o3p_mcp.group_mcp_editor",
     SCOPE_ODOO_READ: "o3p_mcp.group_mcp_user",
-    SCOPE_ODOO_SQL: "o3p_mcp.group_mcp_user",
+    SCOPE_ODOO_SQL: "o3p_mcp.group_mcp_sql",
 }
 SCOPES = tuple(SCOPE_GROUPS)
 # Asked for by clients that want refresh tokens; refresh tokens are always
@@ -353,8 +353,7 @@ class O3pMcpOauth(models.AbstractModel):
                 "changing anything"
             ),
             SCOPE_ODOO_SQL: self.env._(
-                "Run read-only SQL limited to what your account can see "
-                "(reserved, not available yet)"
+                "Run read-only SQL limited to what your account can see"
             ),
         }
         return [(scope, descriptions[scope]) for scope in SCOPES if scope in scopes]

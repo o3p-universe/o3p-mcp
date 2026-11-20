@@ -43,11 +43,13 @@ class O3pMcpApiCase(O3pMcpCommon, HttpCase):
         )
         cls.server_secret = cls.server._set_new_secret()
         cls.admin = env.ref("base.user_admin")
-        cls.admin.write({"groups_id": [Command.link(cls.user_group.id)]})
+        cls.admin.write(
+            {"groups_id": [Command.link(cls.user_group.id), Command.link(cls.sql_group.id)]}
+        )
         cls.restricted = new_test_user(
             env,
             "o3p_mcp_restricted",
-            groups="base.group_user,o3p_mcp.group_mcp_user",
+            groups="base.group_user,o3p_mcp.group_mcp_user,o3p_mcp.group_mcp_sql",
             name="Restricted User",
         )
         cls.portal = new_test_user(

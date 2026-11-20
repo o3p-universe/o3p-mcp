@@ -11,7 +11,7 @@
     <record id="group_mcp_user" model="res.groups">
         <field name="name">User</field>
         <field name="category_id" ref="module_category_mcp"/>
-        <field name="comment">Signs in to the MCP server with the okf.read, odoo.read and odoo.sql scopes.</field>
+        <field name="comment">Signs in to the MCP server with the okf.read and odoo.read scopes.</field>
     </record>
 
     <record id="group_mcp_editor" model="res.groups">
@@ -19,5 +19,20 @@
         <field name="category_id" ref="module_category_mcp"/>
         <field name="implied_ids" eval="[Command.link(ref('group_mcp_user'))]"/>
         <field name="comment">Signs in to the MCP server with the User scopes plus okf.write.</field>
+    </record>
+
+    <!-- SQL is a right of its own: a category with one group, shown on the
+         user form as a selection of its own. It does not imply MCP / User,
+         so that removing MCP / User ends every MCP right in one step. -->
+    <record id="module_category_mcp_sql" model="ir.module.category">
+        <field name="name">MCP SQL</field>
+        <field name="sequence">91</field>
+        <field name="description">Running read-only SQL through the MCP server.</field>
+    </record>
+
+    <record id="group_mcp_sql" model="res.groups">
+        <field name="name">Allowed</field>
+        <field name="category_id" ref="module_category_mcp_sql"/>
+        <field name="comment">With MCP / User, adds the odoo.sql scope: read-only SQL on the rows the user may read.</field>
     </record>
 </odoo>

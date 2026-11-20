@@ -68,6 +68,7 @@ class O3pMcpCommon:
         super().setUpClass()
         cls.user_group = cls.env.ref("o3p_mcp.group_mcp_user")
         cls.editor_group = cls.env.ref("o3p_mcp.group_mcp_editor")
+        cls.sql_group = cls.env.ref("o3p_mcp.group_mcp_sql")
         cls.plain = new_test_user(
             cls.env, "o3p_mcp_plain", groups="base.group_user", name="Plain User"
         )
@@ -80,7 +81,10 @@ class O3pMcpCommon:
         cls.editor = new_test_user(
             cls.env,
             "o3p_mcp_editor",
-            groups="base.group_user,o3p_mcp.group_mcp_user,o3p_mcp.group_mcp_editor",
+            groups=(
+                "base.group_user,o3p_mcp.group_mcp_user,o3p_mcp.group_mcp_editor,"
+                "o3p_mcp.group_mcp_sql"
+            ),
             name="MCP Editor",
         )
         cls.client = cls.env["o3p.mcp.client"].create(
@@ -106,6 +110,7 @@ class O3pMcpCommon:
 
     @classmethod
     def remove_mcp_access(cls, user):
+        # MCP SQL / Allowed may stay: without MCP / User it grants nothing.
         user.write(
             {
                 "groups_id": [

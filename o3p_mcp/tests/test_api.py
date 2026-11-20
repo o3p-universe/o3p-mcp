@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from psycopg2 import errors as pg_errors
 
-from odoo import fields
+from odoo import Command, fields
 from odoo.tests import tagged
 from odoo.tools import mute_logger
 
@@ -115,6 +115,22 @@ class TestApiAuthentication(O3pMcpApiCase):
         # The scope follows the user's groups at every call.
         self.remove_mcp_access(self.restricted)
         self.assertApiError(self.call("models"), "invalid_token")
+
+    def test_sql_needs_its_own_group(self):
+        # MCP / User reads records; SQL needs MCP SQL / Allowed, whatever
+        # scopes the token was issued with.
+        _token, response = self.env["o3p.mcp.token"]._issue(
+            self.client, self.reader, {"okf.read", "odoo.read", "odoo.sql"}, RESOURCE
+        )
+        token = response["access_token"]
+        self.assertEqual(self.call("models", token=token).status_code, 200)
+        self.assertApiError(
+            self.call("sql", {"query": "select 1"}, token=token), "insufficient_scope"
+        )
+        # With the group the same token passes the scope check; no sandbox is
+        # configured in this test.
+        self.reader.write({"groups_id": [Command.link(self.sql_group.id)]})
+        self.assertApiError(self.call("sql", {"query": "select 1"}, token=token), "unavailable")
 
     def test_unknown_operations(self):
         for op in ("write", "unlink", "nope", "SQL"):

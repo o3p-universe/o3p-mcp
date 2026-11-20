@@ -47,14 +47,14 @@ class O3pMcpSqlCase(O3pMcpApiCase):
         cls.restricted2 = new_test_user(
             env,
             "o3p_mcp_restricted2",
-            groups="base.group_user,o3p_mcp.group_mcp_user",
+            groups="base.group_user,o3p_mcp.group_mcp_user,o3p_mcp.group_mcp_sql",
             name="Second Restricted User",
             password="o3p_mcp_restricted2-password",
         )
         cls.multi = new_test_user(
             env,
             "o3p_mcp_multi",
-            groups="base.group_user,o3p_mcp.group_mcp_user",
+            groups="base.group_user,o3p_mcp.group_mcp_user,o3p_mcp.group_mcp_sql",
             name="Multi Company User",
             company_id=main.id,
             company_ids=[Command.set([main.id, cls.company_b.id])],
