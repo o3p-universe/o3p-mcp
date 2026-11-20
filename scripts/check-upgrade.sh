@@ -35,15 +35,25 @@ echo "upgrade $from ($ref) -> $to (working tree)"
 "${compose[@]}" build --quiet odoo
 "${compose[@]}" up -d --wait db sandbox >/dev/null
 # odoo <addons path> <server|shell> [options]: the old tree for the install,
-# this repository after.
+# this repository after. Odoo 18 searches the addons path of its
+# configuration file (/mnt/extra-addons, this repository) before one given
+# after the subcommand, and would load this repository's code in every step;
+# given first as well, the path replaces the configured one from the start.
 odoo() {
     local addons=$1 command=$2
     shift 2
-    "${compose[@]}" run --rm --no-deps -T -v "$old:/mnt/old-addons:ro" odoo odoo "$command" \
+    "${compose[@]}" run --rm --no-deps -T -v "$old:/mnt/old-addons:ro" odoo odoo \
+        --addons-path="$addons" "$command" \
         --addons-path="$addons" -d o3p_mcp_upgrade --log-level=warn "$@"
 }
 
 odoo /mnt/old-addons server -i o3p_mcp --stop-after-init
+installed=$("${compose[@]}" exec -T db psql -U odoo -d o3p_mcp_upgrade -Atc \
+    "SELECT latest_version FROM ir_module_module WHERE name = 'o3p_mcp'")
+if [ "$installed" != "$from" ]; then
+    echo "installed $installed, not $from: the old tree was not the one loaded"
+    exit 1
+fi
 odoo /mnt/old-addons shell --no-http < "$before"
 odoo /mnt/extra-addons server -u o3p_mcp --stop-after-init
 result=$(odoo /mnt/extra-addons shell --no-http < "$after")
