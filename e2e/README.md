@@ -87,14 +87,25 @@ node e2e/lab/check.mjs
 e2e/lab/lab.sh down
 ```
 
+For record writes, open them before serving and run the scenarios after the
+self-check, which compares with the data as it was set up:
+
+```sh
+e2e/lab/lab.sh stack && e2e/lab/lab.sh writes && e2e/lab/lab.sh serve   # serve stays in the foreground
+node e2e/lab/check.mjs && node e2e/lab/writes.mjs
+```
+
 | File | Purpose |
 |---|---|
-| `lab.sh` | `up` starts the stack, plants the canaries and serves; `stack` and `serve` are its two halves; `down` removes the stack and `e2e/.work` |
+| `lab.sh` | `up` starts the stack, plants the canaries and serves; `stack` and `serve` are its two halves; `writes` opens record writing between the two; `down` removes the stack and `e2e/.work` |
 | `plant.py` | Run in `odoo shell`: writes canaries, random strings in places some users must never read (the orders of another salesperson, a hidden model), with the users allowed to see each |
 | `up.mjs` | Builds the okf project, starts okf-mcp and signs every test user in through the OAuth flow; the users without the MCP group and the portal user get no token |
 | `call.mjs` | One MCP call as a test user: `--as <user>`, then `--list`, `--schema <tool>` or `<tool> '<JSON arguments>'`. Prints the answer and appends the call with its complete answer to `e2e/.work/lab/transcripts/<LAB_RUN>/<agent>.<user>.jsonl` (`--agent` names the caller, `LAB_RUN` the run) |
 | `oracle.mjs` | The verdict of a run from its transcripts: `LEAK` when an answer to a user contains a canary, or a secret of the installation, that user may not see; `UNPROVEN` when no allowed user read a canary; else `CLEAN`. Exits non-zero unless clean |
 | `check.mjs` | The lab's own check: an owner reads the canary, another salesperson and a hidden model do not give it, six users calling at once each get the orders the ORM gives them, each user's context names that user and totals without a groupby equal the ORM's (both when the tool pack offers `odoo_context`), and the oracle tells the clean run from a leak |
+| `writes.py` | Run in `odoo shell` by `lab.sh writes`: gives the two salespeople and their manager MCP records / Editor and Odoo's right to create contacts, and opens contacts, sales orders and order lines for writing |
+| `writes.mjs` | Record writes across users, read back through Odoo's own web interface as each user: users without the right are offered no writing tool; a salesperson creates a customer and a quotation with two lines that her manager reads and the other salesperson does not see; each write is in the call log with its record ids and field names; another salesperson's order answers like a missing one; a model that is not opened and a status field are refused; two salespeople changing one customer at the same moment leave the values of one call; no other sales order changes |
+| `writers.workflow.js` | A Claude Code workflow: one salesperson creates a customer and a quotation, the other puts a reference on one of his orders, a user without write rights tries to add a contact, then their manager reviews the quotation. `writers.readback.mjs <mark>` prints what they left in Odoo, for comparison with what they reported |
 | `users.workflow.js` | A Claude Code workflow: one agent per test user does that user's ordinary work through `call.mjs` (sales questions as two salespeople and their manager, a knowledge note as an editor). Its answers are compared with `sales.json` and the run is judged by `oracle.mjs` |
 
 The test users are those of `setup.py` and `setup_sales.py`: `sp_a` and

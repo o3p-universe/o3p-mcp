@@ -3,6 +3,7 @@
 # serving with one token per test user (see up.mjs, call.mjs, oracle.mjs).
 #
 #   e2e/lab/lab.sh stack   # start the stack and plant the canaries; returns
+#   e2e/lab/lab.sh writes  # open record writing (writes.py); before serve
 #   e2e/lab/lab.sh serve   # okf-mcp and the sign-ins; stays in the foreground
 #   e2e/lab/lab.sh up      # stack, then serve
 #   e2e/lab/lab.sh down    # remove the stack and e2e/.work
@@ -29,6 +30,14 @@ stack() {
     echo "canaries planted"
 }
 
+# Before serve: the sign-ins then carry the odoo.write scope.
+writes() {
+    "${compose[@]}" run --rm --no-deps -T odoo odoo shell -d o3p_e2e --no-http --log-level=warn \
+        < "$here/writes.py" 2>/dev/null | sed -n 's/^LAB_WRITES //p' > "$e2e/.work/writes.json"
+    [ -s "$e2e/.work/writes.json" ] || { echo "opening the writes failed" >&2; exit 2; }
+    echo "writes opened: $(cat "$e2e/.work/writes.json")"
+}
+
 serve() {
     export OKF_MCP_DIR=${OKF_MCP_DIR:-$(installed @mfdaves/okf-mcp "${OKF_MCP_VERSION:?set OKF_MCP_DIR or OKF_MCP_VERSION}")}
     export OKF_ODOO_DIR=${OKF_ODOO_DIR:-$(installed @mfdaves/okf-odoo "${OKF_ODOO_VERSION:?set OKF_ODOO_DIR or OKF_ODOO_VERSION}")}
@@ -37,11 +46,12 @@ serve() {
 
 case "${1:-}" in
     stack) stack ;;
+    writes) writes ;;
     serve) serve ;;
     up) stack; serve ;;
     down)
         "${compose[@]}" down -v --remove-orphans
         rm -rf "$e2e/.work"
         ;;
-    *) echo "usage: $0 stack|serve|up|down" >&2; exit 2 ;;
+    *) echo "usage: $0 stack|writes|serve|up|down" >&2; exit 2 ;;
 esac
