@@ -4,6 +4,8 @@
 #
 #   e2e/lab/lab.sh stack   # start the stack and plant the canaries; returns
 #   e2e/lab/lab.sh writes  # open record writing (writes.py); before serve
+#   e2e/lab/lab.sh knowledge  # audiences and knowledge editors (knowledge.py);
+#                             # before serve, which then adds restricted bundles
 #   e2e/lab/lab.sh serve   # okf-mcp and the sign-ins; stays in the foreground
 #   e2e/lab/lab.sh up      # stack, then serve
 #   e2e/lab/lab.sh down    # remove the stack and e2e/.work
@@ -38,6 +40,14 @@ writes() {
     echo "writes opened: $(cat "$e2e/.work/writes.json")"
 }
 
+# Before serve: up.mjs then serves two restricted bundles next to the open one.
+knowledge() {
+    "${compose[@]}" run --rm --no-deps -T odoo odoo shell -d o3p_e2e --no-http --log-level=warn \
+        < "$here/knowledge.py" 2>/dev/null | sed -n 's/^LAB_KNOWLEDGE //p' > "$e2e/.work/knowledge.json"
+    [ -s "$e2e/.work/knowledge.json" ] || { echo "setting up the audiences failed" >&2; exit 2; }
+    echo "audiences: $(cat "$e2e/.work/knowledge.json")"
+}
+
 serve() {
     export OKF_MCP_DIR=${OKF_MCP_DIR:-$(installed @mfdaves/okf-mcp "${OKF_MCP_VERSION:?set OKF_MCP_DIR or OKF_MCP_VERSION}")}
     export OKF_ODOO_DIR=${OKF_ODOO_DIR:-$(installed @mfdaves/okf-odoo "${OKF_ODOO_VERSION:?set OKF_ODOO_DIR or OKF_ODOO_VERSION}")}
@@ -47,11 +57,12 @@ serve() {
 case "${1:-}" in
     stack) stack ;;
     writes) writes ;;
+    knowledge) knowledge ;;
     serve) serve ;;
     up) stack; serve ;;
     down)
         "${compose[@]}" down -v --remove-orphans
         rm -rf "$e2e/.work"
         ;;
-    *) echo "usage: $0 stack|writes|serve|up|down" >&2; exit 2 ;;
+    *) echo "usage: $0 stack|writes|knowledge|serve|up|down" >&2; exit 2 ;;
 esac
