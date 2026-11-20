@@ -68,6 +68,11 @@
                                  help="Field names the data API never exposes, on any model, one pattern per line. Binary fields are always hidden; an empty list restores the default.">
                             <field name="o3p_mcp_api_denied_fields"/>
                         </setting>
+                        <setting id="o3p_mcp_api_writable_models"
+                                 string="Writable models"
+                                 help="Models whose records users of MCP records / Editor may create and change with their own rights, one pattern per line (* matches anything). Empty: nothing can be written. Models that grant access, hold code or send messages are never writable.">
+                            <field name="o3p_mcp_api_writable_models"/>
+                        </setting>
                         <setting id="o3p_mcp_api_limits"
                                  string="Limits"
                                  help="Largest answer, time limit per query and how long the call log is kept.">

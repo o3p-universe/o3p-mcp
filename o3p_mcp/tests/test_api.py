@@ -254,7 +254,10 @@ class TestApiDescribe(O3pMcpApiCase):
 
     def test_describe_shape(self):
         result = self.describe("res.partner")
-        self.assertEqual(list(result), ["model", "name", "table", "fields"])
+        self.assertEqual(list(result), ["model", "name", "table", "access", "fields"])
+        # Nothing is opened for writing by default.
+        self.assertEqual(result["access"], {"create": False, "write": False})
+        self.assertFalse(any(item["writable"] for item in result["fields"]))
         self.assertEqual(result["model"], "res.partner")
         self.assertEqual(result["table"], "res_partner")
         self.assertEqual(self.describe("res.partner.category")["table"], "res_partner_category")
@@ -264,13 +267,14 @@ class TestApiDescribe(O3pMcpApiCase):
         self.assertIn("selection", fields_by_name["type"])
         for item in result["fields"]:
             self.assertLessEqual(
-                {"name", "string", "type", "required", "readonly", "stored", "searchable", "sortable", "groupable"},
+                {"name", "string", "type", "required", "readonly", "stored", "searchable", "sortable",
+                 "groupable", "writable"},
                 set(item),
             )
             self.assertLessEqual(
                 set(item),
                 {"name", "string", "type", "relation", "required", "readonly", "stored", "searchable",
-                 "sortable", "groupable", "selection", "help"},
+                 "sortable", "groupable", "writable", "selection", "help"},
             )
             self.assertNotEqual(item["type"], "binary")
         flags = {

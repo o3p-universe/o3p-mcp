@@ -12,17 +12,19 @@ identical on both. Differences specific to Odoo 18 are listed under
 ## Groups and scopes
 
 The addon adds an **MCP** application category with two groups, shown on
-the user form as one MCP selection, and an **MCP SQL** category with one
-group, shown as a selection of its own:
+the user form as one MCP selection, and the categories **MCP SQL** and
+**MCP records** with one group each, each shown as a selection of its own:
 
 | Group | Scopes granted |
 |---|---|
 | MCP / User | `okf.read`, `odoo.read` |
 | MCP / Editor (implies User) | the User scopes and `okf.write` |
 | MCP SQL / Allowed | `odoo.sql`, for users who also hold MCP / User |
+| MCP records / Editor | `odoo.write`, for users who also hold MCP / User |
 
-MCP SQL / Allowed grants nothing by itself: removing MCP / User (or Editor,
-which implies it) ends every MCP right of a user in one step.
+MCP SQL / Allowed and MCP records / Editor grant nothing by themselves:
+removing MCP / User (or MCP / Editor, which implies it) ends every MCP right
+of a user in one step.
 
 Up to version 1.40 the User group granted `odoo.sql` too. Upgrading from
 such a version gives MCP SQL / Allowed to every internal user who holds
@@ -34,6 +36,7 @@ MCP / User, so nobody loses SQL; new users get it only when it is assigned.
 | `okf.write` | Live write tools and producer runs on the knowledge base |
 | `odoo.read` | Reading Odoo records through the data API, with the user's own rights |
 | `odoo.sql` | Running read-only SQL through the data API on the rows the user may read |
+| `odoo.write` | Creating and changing Odoo records through the data API, with the user's own rights, on the models opened in the settings |
 
 Only active internal users hold scopes: archived users, portal and public
 users (even when placed in an MCP group) and users without the User group
@@ -75,7 +78,7 @@ All URLs are relative to the issuer (see Settings).
 | `POST /o3p_mcp/oauth/token` | Token endpoint (authorization code and refresh token grants) |
 | `POST /o3p_mcp/oauth/introspect` | Token introspection for the MCP server (RFC 7662) |
 | `POST /o3p_mcp/oauth/revoke` | Token revocation (RFC 7009) |
-| `POST /o3p_mcp/api/v1/<op>` | Data API for the MCP server, read-only, as the signed-in user |
+| `POST /o3p_mcp/api/v1/<op>` | Data API for the MCP server, as the signed-in user; read-only until an administrator opens models for writing |
 
 The metadata, registration, token and revocation endpoints answer
 cross-origin requests (`Access-Control-Allow-Origin: *`); their preflight
@@ -126,8 +129,8 @@ client that has not completed a token exchange within 24 hours is deleted.
 - `resource` must be the configured MCP URL (a trailing slash is ignored).
   When it is omitted, the configured MCP URL is used, since it is the only
   resource Odoo issues tokens for.
-- `scope` may list any of the four scopes; `okf.read` is always added,
-  since every call needs it, and without a known scope all four are
+- `scope` may list any of the five scopes; `okf.read` is always added,
+  since every call needs it, and without a known scope all five are
   requested. `offline_access` (asked for by clients that want refresh
   tokens, which are always issued) and unknown scopes are ignored rather
   than refused, as RFC 6749 §3.3 allows. The grant is narrowed to what the
@@ -221,10 +224,12 @@ JSON body:
 Odoo checks the token as introspection does (unrevoked, unexpired, issued to
 an active client for the configured MCP server URL, user active and internal,
 not a portal user, `okf.read` still allowed by the groups) and requires the
-operation's scope (`odoo.read`, or `odoo.sql` for `sql`). The operation then runs as that user, in the
+operation's scope (`odoo.read`, `odoo.sql` for `sql`, `odoo.write` for
+`create` and `update`). The operation then runs as that user, in the
 user's language and time zone: Odoo's access rights, record rules and field
-groups decide what the answer contains. It runs in a read-only database
-transaction with a time limit, so it cannot change anything. The endpoint
+groups decide what the answer contains. A reading operation runs in a
+read-only database transaction with a time limit, so it cannot change
+anything; `create` and `update` are described under Writing records. The endpoint
 answers no cross-origin requests and never creates a session.
 
 A success is `200 { "result": … }`. An error is
@@ -238,7 +243,7 @@ exception, PostgreSQL's answer to an SQL query, is described under SQL):
 | 401 | `invalid_client` | The resource-server credentials are missing or wrong |
 | 403 | `invalid_token` | The user's token fails any check above |
 | 403 | `insufficient_scope` | The token lacks the operation's scope |
-| 403 | `access_denied` | The user may not read the model or the records |
+| 403 | `access_denied` | The user may not read the model or the records; for a write, the model is not opened for writing or the user may not create or change the records |
 | 404 | `unknown_op` | The operation does not exist |
 | 404 | `unknown_model` | The model does not exist, is transient or abstract, or is hidden |
 | 413 | `result_too_large` | The answer exceeds the configured size |
@@ -263,7 +268,9 @@ field reached through a path belongs to), `reason` one of `unknown_param`,
 `not_filterable`, `not_searchable`, `not_sortable`, `not_groupable`,
 `not_relational`, `bypass_relation`, `no_relation_access`,
 `no_model_access`, `unknown_model`, `bad_operator`, `bad_order`, `bad_aggregate`,
-`granularity_required` or `bad_granularity`, and `hint` a fixed sentence for
+`granularity_required` or `bad_granularity`, for writes also
+`model_not_writable`, `no_write_access`, `no_record_access`, `not_writable`,
+`unknown_record`, `required_missing` or `bad_company`, and `hint` a fixed sentence for
 that reason (for `hr.employee`: use `hr.employee.public`). Details contain
 schema names and fixed texts only, never record data or Odoo's own error
 text.
@@ -273,7 +280,7 @@ text.
 | Operation | Parameters | Result |
 |---|---|---|
 | `models` | `query` (optional, matched on the technical and the display name), `limit` (1–50, default 50), `offset` (optional, 0–10000) | `{ "models": [{ "model", "name" }], "total", "truncated" }`: the models the user may read, sorted by technical name; `total` counts all that match, `truncated` tells whether more follow |
-| `describe` | `model` | `{ "model", "name", "table", "fields": [{ "name", "string", "type", "relation"?, "required", "readonly", "stored", "searchable", "sortable", "groupable", "selection"?, "help"? }] }`: the fields the user may read; `table` is the database table or view of the model, `null` when it is computed from a query; `stored` tells whether the field has a column of its own (one2many and many2many have none), `searchable`, `sortable` and `groupable` whether domains, `order` and `groupby` accept it for this user |
+| `describe` | `model` | `{ "model", "name", "table", "access", "fields": [{ "name", "string", "type", "relation"?, "required", "readonly", "stored", "searchable", "sortable", "groupable", "writable", "selection"?, "help"? }] }`: the fields the user may read; `access` is `{ "create", "write" }`, whether the model is opened for writing and Odoo gives the user that right, and `writable` whether `create` and `update` take a value for the field; `table` is the database table or view of the model, `null` when it is computed from a query; `stored` tells whether the field has a column of its own (one2many and many2many have none), `searchable`, `sortable` and `groupable` whether domains, `order` and `groupby` accept it for this user |
 | `search` | `model`, `domain`, `fields`, `order`?, `limit` (1–200, default 80), `offset`? (0–1000000) | `{ "records", "count", "truncated" }` |
 | `read` | `model`, `ids` (1–100), `fields` | `{ "records" }` |
 | `group` | `model`, `domain`, `groupby`? (0–5), `aggregates` (1–20), `order`?, `limit` (1–500, default 80) | `{ "groups": [{ <groupby and aggregate keys> }] }` |
@@ -374,6 +381,68 @@ The API shows what Odoo itself shows the user, no less and no more:
   read hides what it must. Overrides reviewed as hiding nothing are listed
   in `models/denylist.py` (`account.move`, `account.move.line`, `crm.lead`,
   `hr.employee`, `ir.actions.act_window`, `mrp.bom.line`).
+
+### Writing records
+
+`create` and `update` (scope `odoo.write`) change records as the signed-in
+user. Nothing can be written until an administrator lists the writable
+models in the settings; the list is empty by default.
+
+| Operation | Parameters | Result |
+|---|---|---|
+| `create` | `model`, `records` (1–20 objects of field values), `company`? | `{ "records": [{ "id", "display_name" }] }` |
+| `update` | `model`, `ids` (1–100), `values` (one object of field values), `company`? | `{ "records": [{ "id", "display_name" }] }` |
+
+Every part of a call is checked as the user before anything is written, and
+a call writes all of its records or none:
+
+- The model must be exposed, on the list of writable models, and Odoo must
+  give the user the right to create or change its records
+  (`model_not_writable`, `no_write_access`). Some models are never writable,
+  whatever the list says, because their records grant access, hold code Odoo
+  runs, or send messages: `ir.*`, `res.users*`, `res.groups*`,
+  `base.automation*`, `o3p.mcp.*`, `mail.mail`, `mail.message`,
+  `mail.followers`, `mail.notification`, `mail.template*`, `mail.alias*`,
+  `sms.*`, `payment.*`, every hidden model and every model that hides data
+  when it is read.
+- A field takes a value when the user may read and write it and it is not
+  hidden, not read-only on its definition, not computed without an inverse,
+  not related to another record's field, and of a supported type
+  (`not_writable`). Odoo's own ORM accepts values for read-only fields; the
+  API does not, so a status changes through Odoo's buttons, not by setting
+  the field. `describe` marks the writable fields.
+- Values: JSON strings for char, text and html fields (html only where Odoo
+  sanitises it), numbers for integer, float and monetary fields, booleans,
+  `"YYYY-MM-DD"` for dates and `"YYYY-MM-DD HH:MM:SS"` in UTC for datetimes,
+  a selection's key, a record id for a many-to-one, and for a many-to-many a
+  list of ids, which replaces the linked records, or
+  `{ "add": [ids], "remove": [ids] }`. `false` empties a field. One-to-many,
+  binary, json, properties and reference fields cannot be written.
+- A related record must be one the user may read, on an exposed model; an id
+  that does not exist and one the user may not read get the same answer
+  (`unknown_record`), as do the `ids` of `update`.
+- `create` names a required field without a value or a default
+  (`required_missing`).
+- `company` is the id of one of the user's companies, which then is the
+  active company of the call (`bad_company`); without it the user's default
+  company applies.
+
+When Odoo itself refuses the change (a constraint, a validation), the answer
+is `query_error` with `details: { "message": … }`: Odoo's own message for
+the user, as its web client would show it, at most 500 characters. An access
+error keeps the fixed `access_denied`.
+
+A write runs in a sub-transaction with the data API's time limit and is
+committed together with its row in the call log: when the row cannot be
+written, the write is undone and the answer is `query_error`. Messages and
+notifications a refused write had queued are dropped with it. A conflict
+between two calls that change the same record at the same moment is left to
+Odoo, which runs the later request again: the record holds the values of
+one call, never a mix.
+
+Restrictions that exist only in a form view, such as a field a view makes
+read-only for confirmed documents, do not apply, as for Odoo's import and
+its external API.
 
 ### SQL
 
@@ -493,8 +562,9 @@ tests until it is hidden or reviewed.
 Every call that reaches the operation or fails authentication is recorded
 in **Settings › Technical › MCP › API Calls**: time, user, MCP client,
 operation, model (for `sql`: the tables copied), HTTP status, error code,
-row count and duration. Parameters, SQL queries and results are never
-stored. Rows older than the configured number of days
+row count and duration, and for `create` and `update` the ids of the
+records written and the names of the fields set. Parameters, SQL queries,
+results and written values are never stored. Rows older than the configured number of days
 (default 30) are deleted by the daily scheduled action.
 
 ## Settings
@@ -511,6 +581,7 @@ values under `o3p_mcp.*`:
 | Client registrations per hour from one address or IPv6 /64, 1 to 100000 | `o3p_mcp.registration_limit` | 200 |
 | Data API hidden models, one pattern per line | `o3p_mcp.api_denied_models` | see Data API |
 | Data API hidden field names, one pattern per line | `o3p_mcp.api_denied_fields` | see Data API |
+| Data API writable models, one pattern per line | `o3p_mcp.api_writable_models` | empty: nothing can be written |
 | Data API largest answer (KB; stored in bytes) | `o3p_mcp.api_max_response_bytes` | 1000 KB |
 | Data API time limit per query (seconds) | `o3p_mcp.api_timeout_seconds` | 15 |
 | Data API call log retention (days) | `o3p_mcp.api_log_days` | 30 |
@@ -578,7 +649,9 @@ data API below. Both are on npm; the okf-mcp versions with HTTP are
 published under the `next` tag.
 
 1. Install the addon and give users the **MCP / User** or **MCP / Editor**
-   group, and **MCP SQL / Allowed** to those who may run SQL.
+   group, **MCP SQL / Allowed** to those who may run SQL and **MCP records /
+   Editor** to those who may create and change records; list the writable
+   models in the settings.
 2. In **Settings › MCP**, check the issuer, enter the MCP server URL and
    create the introspection credentials.
 3. In the directory of the okf project, install okf-mcp and the tool pack
@@ -630,12 +703,16 @@ published under the `next` tag.
    protected-resource metadata, discovers Odoo, registers itself, opens the
    Odoo sign-in page and asks the user for consent.
 
-A signed-in user then has, next to the knowledge tools, `odoo_find_models`,
+A signed-in user then has, next to the knowledge tools, `odoo_context`
+(okf-odoo newer than 0.1.2), `odoo_find_models`,
 `odoo_describe_model`, `odoo_search`, `odoo_read` and `odoo_group` (scope
 `odoo.read`) and, with MCP SQL / Allowed, `odoo_sql` (scope `odoo.sql`),
 each running as that user through the data API. `odoo_sql` needs the SQL
 sandbox (see SQL sandbox
-setup); without one it answers `unavailable`. The data tools are offered only
+setup); without one it answers `unavailable`. With MCP records / Editor
+the user also has `odoo_create` and `odoo_update` (scope `odoo.write`,
+okf-odoo newer than 0.1.2), announced to the client as tools that are not
+read-only. The data tools are offered only
 over HTTP to a signed-in user. okf-odoo also has a producer that writes
 Odoo's modules, models, fields, groups and menus as an `odoo` knowledge
 bundle, to which the tools' descriptions point agents; it reads Odoo with an
@@ -678,9 +755,10 @@ API key of its own (see the okf-odoo README).
 
 ## Odoo 18 notes
 
-- The groups belong to the module categories **MCP** and **MCP SQL**
-  (Odoo 20 groups them under privileges of the same names). Access to the addon's own records is granted by
-  `ir.model.access` to Settings administrators only.
+- The groups belong to the module categories **MCP**, **MCP SQL** and
+  **MCP records** (Odoo 20 groups them under privileges of the same names).
+  Access to the addon's own records is granted by `ir.model.access` to
+  Settings administrators only.
 - Odoo 18 has no light and regular internal users: a user is internal or
   portal. The MCP groups imply no other group, so giving them to a user
   changes neither the user type nor any right on Odoo records.

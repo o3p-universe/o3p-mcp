@@ -17,12 +17,14 @@ SCOPE_WRITE = "okf.write"
 SCOPE_ODOO_READ = "odoo.read"
 # Permission-scoped SQL (the data API's sql operation).
 SCOPE_ODOO_SQL = "odoo.sql"
+SCOPE_ODOO_WRITE = "odoo.write"
 # Each scope and the group that grants it, in the order scopes are listed.
 SCOPE_GROUPS = {
     SCOPE_READ: "o3p_mcp.group_mcp_user",
     SCOPE_WRITE: "o3p_mcp.group_mcp_editor",
     SCOPE_ODOO_READ: "o3p_mcp.group_mcp_user",
     SCOPE_ODOO_SQL: "o3p_mcp.group_mcp_sql",
+    SCOPE_ODOO_WRITE: "o3p_mcp.group_mcp_record_editor",
 }
 SCOPES = tuple(SCOPE_GROUPS)
 # Asked for by clients that want refresh tokens; refresh tokens are always
@@ -354,6 +356,10 @@ class O3pMcpOauth(models.AbstractModel):
             ),
             SCOPE_ODOO_SQL: self.env._(
                 "Run read-only SQL limited to what your account can see"
+            ),
+            SCOPE_ODOO_WRITE: self.env._(
+                "Create and change Odoo records your account may edit, on the "
+                "models the administrator opened"
             ),
         }
         return [(scope, descriptions[scope]) for scope in SCOPES if scope in scopes]

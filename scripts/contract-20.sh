@@ -30,6 +30,10 @@ data["source"] = (
     f"o3p_mcp branch 20.0 at {revision} on Odoo 20.0 (generated from the code, not edited by hand;"
     " data API and SQL parts by scripts/contract-20.sh)"
 )
+data["data_api_details_source"] = (
+    f"o3p_mcp branch 20.0 at {revision} (REASONS, MODEL_HINTS and the details example,"
+    " generated from the code)"
+)
 with open(fixture, "w") as handle:
     json.dump(data, handle, ensure_ascii=False, indent=2)
     handle.write("\n")

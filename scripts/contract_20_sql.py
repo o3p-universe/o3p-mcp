@@ -90,6 +90,14 @@ json.dump(
         "data_api_messages": {
             name: getattr(api_module, name) for name in sorted(dir(api_module)) if name.startswith("MSG_")
         },
+        # The fixed explanations of error details, and one complete answer.
+        "data_api_reasons": api_module.REASONS,
+        "data_api_model_hints": api_module.MODEL_HINTS,
+        "data_api_details_example": dumps(
+            api_module.invalid(
+                "granularity_required", "create_date", message=api_module.MSG_GROUPBY
+            ).to_dict()
+        ),
         "sql_messages": {
             name: getattr(api_sql, name) for name in sorted(dir(api_sql)) if name.startswith("MSG_")
         },

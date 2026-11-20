@@ -12,6 +12,8 @@
                 <field name="op"/>
                 <field name="model"/>
                 <field name="tables" optional="hide"/>
+                <field name="record_ids" optional="show"/>
+                <field name="field_names" optional="hide"/>
                 <field name="status"/>
                 <field name="error" optional="show"/>
                 <field name="row_count"/>
@@ -31,6 +33,7 @@
                 <field name="op"/>
                 <field name="error"/>
                 <filter name="failed" string="Failed" domain="[('status', '&gt;=', 400)]"/>
+                <filter name="writes" string="Writes" domain="[('op', 'in', ('create', 'update'))]"/>
                 <separator/>
                 <filter name="group_user" string="User" context="{'group_by': 'user_id'}"/>
                 <filter name="group_model" string="Model" context="{'group_by': 'model'}"/>

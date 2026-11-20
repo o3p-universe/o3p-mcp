@@ -152,6 +152,7 @@ class TestMetadataAndRegistration(HttpCase):
                     "okf.write",
                     "odoo.read",
                     "odoo.sql",
+                    "odoo.write",
                     "offline_access",
                 ],
                 "response_types_supported": ["code"],
