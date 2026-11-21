@@ -4,3 +4,4 @@ access_o3p_mcp_code_system,o3p.mcp.code system,model_o3p_mcp_code,base.group_sys
 access_o3p_mcp_token_system,o3p.mcp.token system,model_o3p_mcp_token,base.group_system,1,1,1,1
 access_o3p_mcp_api_log_system,o3p.mcp.api.log system,model_o3p_mcp_api_log,base.group_system,1,1,1,1
 access_o3p_mcp_audience_system,o3p.mcp.audience system,model_o3p_mcp_audience,base.group_system,1,1,1,1
+access_o3p_mcp_action_system,o3p.mcp.action system,model_o3p_mcp_action,base.group_system,1,1,1,1

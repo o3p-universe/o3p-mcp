@@ -1,5 +1,5 @@
 {
-  "source": "o3p_mcp branch 20.0 at 103389b on Odoo 20.0 (generated from the code, not edited by hand; data API and SQL parts by scripts/contract-20.sh)",
+  "source": "o3p_mcp branch 20.0 at 48cab61 on Odoo 20.0 (generated from the code, not edited by hand; data API and SQL parts by scripts/contract-20.sh)",
   "data_api_errors": [
     {
       "code": "invalid_params",
@@ -210,15 +210,20 @@
     "bad_granularity": "Only date and datetime fields take a granularity: day, week, month, quarter or year, and hour for datetimes.",
     "model_not_writable": "The administrator has not opened this model for writing through MCP.",
     "no_write_access": "The user may not create or change records of this model in Odoo.",
+    "no_wizard_access": "The user may not use this wizard in Odoo.",
     "no_record_access": "The user may not change one of these records in Odoo.",
     "not_writable": "The field is read-only, computed, related, hidden or of a type that cannot be written; describe marks the writable fields.",
     "unknown_record": "A record id does not exist or the user may not read it.",
     "required_missing": "Give a value for this required field.",
-    "bad_company": "Use the id of one of the user's companies; the context operation (odoo_context) lists them."
+    "bad_company": "Use the id of one of the user's companies; the context operation (odoo_context) lists them.",
+    "unknown_action": "Call the actions operation (odoo_find_actions) to list the actions you may run.",
+    "action_unavailable": "The action cannot run as it is defined; an administrator sees why in Settings, Technical, MCP, Exposed actions.",
+    "record_count": "Give as many record ids as the action takes; describe_action tells how many.",
+    "no_inputs": "This action takes no values; describe_action lists the inputs of an action."
   },
   "data_api_model_hints": {
     "hr.employee": "The user may not read hr.employee: use hr.employee.public, which every employee may read."
   },
   "data_api_details_example": "{\"error\": {\"code\": \"invalid_params\", \"message\": \"groupby is not valid: use groupable readable fields; date fields need a granularity (day, week, month, quarter, year, or hour for datetimes).\", \"details\": {\"field\": \"create_date\", \"reason\": \"granularity_required\", \"hint\": \"Append :day, :week, :month, :quarter or :year to a date field (or :hour to a datetime field).\"}}}",
-  "data_api_details_source": "o3p_mcp branch 20.0 at 103389b (REASONS, MODEL_HINTS and the details example, generated from the code)"
+  "data_api_details_source": "o3p_mcp branch 20.0 at 48cab61 (REASONS, MODEL_HINTS and the details example, generated from the code)"
 }

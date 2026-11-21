@@ -140,6 +140,10 @@ class ResConfigSettings(models.TransientModel):
         string="What the list opens",
         compute="_compute_o3p_mcp_api_writable_summary",
     )
+    o3p_mcp_action_count = fields.Integer(
+        string="Exposed actions",
+        compute="_compute_o3p_mcp_action_count",
+    )
     o3p_mcp_api_max_response_kb = fields.Integer(
         string="Largest answer (KB)",
         default=DEFAULT_MAX_RESPONSE_BYTES // 1000,
@@ -250,6 +254,9 @@ class ResConfigSettings(models.TransientModel):
         listed = patterns(self.o3p_mcp_api_writable_models, ())
         if not any(fnmatch.fnmatchcase(name, item) for item in listed):
             self.o3p_mcp_api_writable_models = "\n".join([*listed, name])
+
+    def _compute_o3p_mcp_action_count(self):
+        self.o3p_mcp_action_count = self.env["o3p.mcp.action"].sudo().search_count([])
 
     @api.depends("o3p_mcp_api_writable_models")
     def _compute_o3p_mcp_api_writable_summary(self):
