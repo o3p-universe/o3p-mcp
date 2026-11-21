@@ -26,6 +26,7 @@ REVIEWED_WIZARDS = {
     "project.task.type.delete.wizard": "archives or deletes task stages",
     "project.template.create.wizard": "creates a project from a template",
     "project.template.role.to.users.map": "a line of the project template wizard",
+    "sale.order.discount": "applies a discount to a quotation the user may change",
 }
 
 

@@ -105,9 +105,18 @@ e2e/lab/lab.sh stack && e2e/lab/lab.sh knowledge && e2e/lab/lab.sh serve   # ser
 node e2e/lab/knowledge.mjs
 ```
 
+For exposed actions, expose them before serving. It needs an okf-odoo with
+the action tools (newer than 0.2.0), given as a checkout:
+
+```sh
+export OKF_MCP_DIR=/path/to/okf-mcp OKF_ODOO_DIR=/path/to/okf-odoo
+e2e/lab/lab.sh stack && e2e/lab/lab.sh actions && e2e/lab/lab.sh serve   # serve stays in the foreground
+node e2e/lab/actions.mjs
+```
+
 | File | Purpose |
 |---|---|
-| `lab.sh` | `up` starts the stack, plants the canaries and serves; `stack` and `serve` are its two halves; `writes` opens record writing and `knowledge` sets up audiences between the two; `down` removes the stack and `e2e/.work` |
+| `lab.sh` | `up` starts the stack, plants the canaries and serves; `stack` and `serve` are its two halves; `writes` opens record writing, `knowledge` sets up audiences and `actions` exposes actions between the two; `down` removes the stack and `e2e/.work` |
 | `plant.py` | Run in `odoo shell`: writes canaries, random strings in places some users must never read (the orders of another salesperson, a hidden model), with the users allowed to see each |
 | `up.mjs` | Builds the okf project, starts okf-mcp and signs every test user in through the OAuth flow; the users without the MCP group and the portal user get no token |
 | `call.mjs` | One MCP call as a test user: `--as <user>`, then `--list`, `--schema <tool>` or `<tool> '<JSON arguments>'`. Prints the answer and appends the call with its complete answer to `e2e/.work/lab/transcripts/<LAB_RUN>/<agent>.<user>.jsonl` (`--agent` names the caller, `LAB_RUN` the run) |
@@ -116,6 +125,8 @@ node e2e/lab/knowledge.mjs
 | `writes.py` | Run in `odoo shell` by `lab.sh writes`: gives the two salespeople and their manager MCP records / Editor and Odoo's right to create contacts, and opens contacts, sales orders and order lines for writing |
 | `writes.mjs` | Record writes across users, read back through Odoo's own web interface as each user: users without the right are offered no writing tool; a salesperson creates a customer and a quotation with two lines that her manager reads and the other salesperson does not see; each write is in the call log with its record ids and field names; another salesperson's order answers like a missing one; a model that is not opened and a status field are refused; two salespeople changing one customer at the same moment leave the values of one call; no other sales order changes |
 | `writers.workflow.js` | A Claude Code workflow: one salesperson creates a customer and a quotation, the other puts a reference on one of his orders, a user without write rights tries to add a contact, then their manager reviews the quotation. `writers.readback.mjs <mark>` prints what they left in Odoo, for comparison with what they reported |
+| `actions.py` | Run in `odoo shell` by `lab.sh actions`: exposes three actions on sales orders (the button that confirms a quotation, the discount wizard, a server action for sales managers only), gives the two salespeople and their manager MCP records / Editor and opens record writing as `writes.py` does |
+| `actions.mjs` | Exposed actions across users, read back through Odoo's own web interface: users without the right may list actions but are offered no tool that runs one; each user is listed the actions Odoo lets them run; a salesperson discounts her quotation through the wizard and confirms it with the button; Odoo's own refusal comes back in its words; another salesperson's quotation answers like a missing one and stays as it was; the managers' action is unknown to a salesperson and runs for the manager; every run is in the call log with its action, records and input names; no other order changed; no answer holds a canary or a secret |
 | `knowledge.py` | Run in `odoo shell` by `lab.sh knowledge`: creates the audiences `sales` (the salespeople's group) and `management` (the sales manager's group) and makes one salesperson and the manager knowledge editors. `up.mjs` then serves two restricted bundles, `sales-notes` and `management-notes`, next to the open ones, each seeded with a note that carries a canary |
 | `knowledge.mjs` | Company knowledge across users: each user is offered the bundles of their audiences; the seeded notes are found by their audiences only; a management note is found by the manager and the administrator and answers the others like a missing one; a sales note is found by the sales audience; a note in the open bundle is found by everyone and may not point at a restricted note; a user cannot write into a bundle outside their audiences; two users writing at once both succeed, each commit by its author; a user who leaves an audience's group loses its bundle within a minute; the oracle finds the run clean |
 | `knowledge.workflow.js` | A Claude Code workflow: a salesperson saves a finding from her Odoo data for the sales team, the manager records a decision for management, then three other users look for both notes |

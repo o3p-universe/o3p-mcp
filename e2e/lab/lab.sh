@@ -6,6 +6,8 @@
 #   e2e/lab/lab.sh writes  # open record writing (writes.py); before serve
 #   e2e/lab/lab.sh knowledge  # audiences and knowledge editors (knowledge.py);
 #                             # before serve, which then adds restricted bundles
+#   e2e/lab/lab.sh actions # three exposed actions on sales orders and record
+#                          # writing (actions.py); before serve
 #   e2e/lab/lab.sh serve   # okf-mcp and the sign-ins; stays in the foreground
 #   e2e/lab/lab.sh up      # stack, then serve
 #   e2e/lab/lab.sh down    # remove the stack and e2e/.work
@@ -40,6 +42,14 @@ writes() {
     echo "writes opened: $(cat "$e2e/.work/writes.json")"
 }
 
+# Before serve: the sign-ins then carry the odoo.write scope.
+actions() {
+    "${compose[@]}" run --rm --no-deps -T odoo odoo shell -d o3p_e2e --no-http --log-level=warn \
+        < "$here/actions.py" 2>/dev/null | sed -n 's/^LAB_ACTIONS //p' > "$e2e/.work/actions.json"
+    [ -s "$e2e/.work/actions.json" ] || { echo "exposing the actions failed" >&2; exit 2; }
+    echo "actions exposed: $(cat "$e2e/.work/actions.json")"
+}
+
 # Before serve: up.mjs then serves two restricted bundles next to the open one.
 knowledge() {
     "${compose[@]}" run --rm --no-deps -T odoo odoo shell -d o3p_e2e --no-http --log-level=warn \
@@ -58,11 +68,12 @@ case "${1:-}" in
     stack) stack ;;
     writes) writes ;;
     knowledge) knowledge ;;
+    actions) actions ;;
     serve) serve ;;
     up) stack; serve ;;
     down)
         "${compose[@]}" down -v --remove-orphans
         rm -rf "$e2e/.work"
         ;;
-    *) echo "usage: $0 stack|writes|knowledge|serve|up|down" >&2; exit 2 ;;
+    *) echo "usage: $0 stack|writes|knowledge|actions|serve|up|down" >&2; exit 2 ;;
 esac
