@@ -1004,3 +1004,6 @@ working tree and runs the second, which prints `UPGRADE OK` when what it
 expects holds. `scripts/upgrade/` holds the pairs; `sql-group-before.py` and
 `sql-group-after.py` check that the users who held MCP / User before 1.41
 keep `odoo.sql` and that nobody else receives it.
+`actions-before.py` and `actions-after.py` check that an upgrade from before
+1.46 exposes no action and leaves the call log and the writable models as
+they were.
