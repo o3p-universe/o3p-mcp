@@ -6,9 +6,10 @@
         "and introspects OAuth 2.1 access tokens whose scopes follow the user's "
         "MCP groups. The MCP server reads Odoo records, runs read-only SQL in a "
         "separate PostgreSQL sandbox and, on the models an administrator opens, "
-        "creates and updates records, all with the rights of the signed-in user."
+        "creates and updates records; it runs the buttons and server actions an "
+        "administrator exposes. All with the rights of the signed-in user."
     ),
-    "version": "20.0.1.46.0",
+    "version": "20.0.1.47.0",
     "category": "Technical",
     "author": "O3P",
     "website": "https://github.com/o3p-universe/o3p-mcp",

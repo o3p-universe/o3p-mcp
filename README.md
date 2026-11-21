@@ -32,7 +32,7 @@ MCP / User, so nobody loses SQL; new users get it only when it is assigned.
 | `okf.write` | Live write tools and producer runs on the knowledge base |
 | `odoo.read` | Reading Odoo records through the data API, with the user's own rights |
 | `odoo.sql` | Running read-only SQL through the data API on the rows the user may read |
-| `odoo.write` | Creating and changing Odoo records through the data API, with the user's own rights, on the models opened in the settings |
+| `odoo.write` | Creating and changing Odoo records through the data API, with the user's own rights, on the models opened in the settings, and running the exposed actions |
 
 Only active internal users hold scopes: archived users, portal and public
 users (even when placed in an MCP group) and users without the User group
@@ -285,7 +285,7 @@ field reached through a path belongs to), `reason` one of `unknown_param`,
 `granularity_required` or `bad_granularity`, for writes also
 `model_not_writable`, `no_write_access`, `no_record_access`, `not_writable`,
 `unknown_record`, `required_missing` or `bad_company`, for actions
-`unknown_action` or `action_unavailable`, and `hint` a fixed sentence for
+`unknown_action`, `action_unavailable` or `record_count`, and `hint` a fixed sentence for
 that reason (for `hr.employee`: use `hr.employee.public`). Details contain
 schema names and fixed texts only, never record data or Odoo's own error
 text.
@@ -498,13 +498,42 @@ method, is marked in the list with the reason and answers
 |---|---|---|
 | `actions` | `query`? (matched on the name, title, description and model), `model`?, `limit` (1–50, default 50), `offset`? (0–10000) | `{ "actions": [{ "name", "title", "description", "kind", "model", "records": [fewest, most], "inputs" }], "total", "truncated" }`: the actions the user may run, sorted by name |
 | `describe_action` | `action` | The entry of `actions`, with `summary` (what runs, in words) and `steps` (the methods called, in order) |
+| `run_action` | `action`, `ids` (as many as the action takes), `company`? | `{ "done": true, "records": [{ "id", "display_name" }], "returned"? }` |
 
-Both need the scope `odoo.read`. The actions a user may run are those
-exposed to them (no groups on the action, or one of them held) for which
-Odoo gives the user write access on the model of the records and, for a
-server action limited to groups, one of its groups. A name that does not
-exist and an action exposed to other groups get the same answer
-(`unknown_action`); a missing Odoo right is named (`no_write_access`).
+`actions` and `describe_action` need the scope `odoo.read`, `run_action`
+the scope `odoo.write`. The actions a user may run are those exposed to
+them (no groups on the action, or one of them held) for which Odoo gives
+the user write access on the model of the records and, for a server action
+limited to groups, one of its groups. A name that does not exist and an
+action exposed to other groups get the same answer (`unknown_action`); a
+missing Odoo right is named (`no_write_access`).
+
+`run_action` runs the action as the signed-in user, after these checks:
+
+- `ids` holds as many records as the action takes (`record_count`); each
+  exists and is one the user may read (`unknown_record`, the same answer
+  for both) and change in Odoo (`no_record_access`), as Odoo requires of a
+  server action.
+- `company` is one of the user's companies, as for a write.
+
+A record button is called on the records as Odoo's web client calls it; a
+server action runs as it does from the Action menu, where Odoo checks the
+action's groups and the write access again. As there, an "update record"
+or "create record" server action is applied by Odoo with administrator
+rights once that check has passed; code runs as the user.
+
+The answer lists the records with their names after the run, and under
+`returned` what Odoo would open next, when the button answered with an
+action: its `type` and `name`, the `title` and `message` of a notification,
+and the `model` it opens, with `wizard: true` for a wizard and `ids` for a
+record the user may read. A button that answers with a wizard has not
+finished its work: Odoo is asking for more.
+
+A run follows the rules of a write: it runs in a sub-transaction with the
+data API's time limit, Odoo's own refusal comes back as `query_error` with
+`details: { "message": … }`, and it is committed together with its row in
+the call log or not at all. Code that commits or rolls back the transaction
+itself is refused, and the call undone, because it would break that rule.
 
 ### SQL
 
@@ -625,9 +654,10 @@ tests until it is hidden or reviewed.
 Every call that reaches the operation or fails authentication is recorded
 in **Settings › Technical › MCP › API Calls**: time, user, MCP client,
 operation, model (for `sql`: the tables copied), HTTP status, error code,
-row count and duration, and for `create` and `update` the ids of the
-records written and the names of the fields set. Parameters, SQL queries,
-results and written values are never stored. Rows older than the configured number of days
+row count and duration, for `create` and `update` the ids of the records
+written and the names of the fields set, and for `describe_action` and
+`run_action` the name of the action and the ids of the records it ran on.
+Parameters, SQL queries, results and written values are never stored. Rows older than the configured number of days
 (default 30) are deleted by the daily scheduled action.
 
 ## Settings

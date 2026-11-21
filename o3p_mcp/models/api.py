@@ -180,6 +180,7 @@ REASONS = {
     "bad_company": "Use the id of one of the user's companies; the context operation (odoo_context) lists them.",
     "unknown_action": "Call the actions operation (odoo_find_actions) to list the actions you may run.",
     "action_unavailable": "The action cannot run as it is defined; an administrator sees why in Settings, Technical, MCP, Exposed actions.",
+    "record_count": "Give as many record ids as the action takes; describe_action tells how many.",
 }
 # Hints that replace no_model_access for some models.
 MODEL_HINTS = {
@@ -232,8 +233,11 @@ class O3pMcpApi(models.AbstractModel):
         # The exposed actions live in api_action.py.
         "actions": ("_op_actions", SCOPE_ODOO_READ, {"query", "model", "limit", "offset"}),
         "describe_action": ("_op_describe_action", SCOPE_ODOO_READ, {"action"}),
+        "run_action": ("_op_run_action", SCOPE_ODOO_WRITE, {"action", "ids", "company"}),
     }
-    _WRITE_OPS = frozenset({"create", "update"})
+    _WRITE_OPS = frozenset({"create", "update", "run_action"})
+    # Operations that name an exposed action: the call log records the name.
+    _ACTION_OPS = frozenset({"describe_action", "run_action"})
 
     # ------------------------------------------------------------------
     # Configuration

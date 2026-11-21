@@ -10,6 +10,7 @@
                 <field name="user_id"/>
                 <field name="client_id" optional="show"/>
                 <field name="op"/>
+                <field name="action" optional="show"/>
                 <field name="model"/>
                 <field name="tables" optional="hide"/>
                 <field name="record_ids" optional="show"/>
@@ -31,13 +32,16 @@
                 <field name="model"/>
                 <field name="tables"/>
                 <field name="op"/>
+                <field name="action"/>
                 <field name="error"/>
                 <filter name="failed" string="Failed" domain="[('status', '&gt;=', 400)]"/>
                 <filter name="writes" string="Writes" domain="[('op', 'in', ('create', 'update'))]"/>
+                <filter name="actions" string="Actions run" domain="[('op', '=', 'run_action')]"/>
                 <separator/>
                 <filter name="group_user" string="User" context="{'group_by': 'user_id'}"/>
                 <filter name="group_model" string="Model" context="{'group_by': 'model'}"/>
                 <filter name="group_op" string="Operation" context="{'group_by': 'op'}"/>
+                <filter name="group_action" string="Exposed action" context="{'group_by': 'action'}"/>
             </search>
         </field>
     </record>

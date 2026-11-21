@@ -11,6 +11,7 @@ from odoo.sql_db import PG_CONCURRENCY_EXCEPTIONS_TO_RETRY
 from odoo.tools import json_default
 
 from ..models.api import ApiError
+from ..models.mcp_action import NAME_RE
 from ..models.mcp_token import LAST_USED_RESOLUTION
 from ..models.oauth import OAuthError
 from .oauth import NO_STORE, client_credentials
@@ -97,6 +98,12 @@ class O3pMcpApiController(http.Controller):
                 raise ApiError("invalid_params")
             Api = request.env["o3p.mcp.api"]
             scope = Api._op_scope(op)
+            params = body.get("params")
+            if op in Api._ACTION_OPS and isinstance(params, dict):
+                # The name of the action, when it is shaped like one.
+                name = params.get("action")
+                if isinstance(name, str) and NAME_RE.fullmatch(name):
+                    audit["action"] = name
             token, user = Api._check_token(body.get("token"), scope)
             token_id = token.id
             audit.update(user_id=user.id, client_id=token.client_id.id)

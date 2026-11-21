@@ -8,12 +8,16 @@ class O3pMcpApiLog(models.Model):
 
     # Who called what, how it ended and how long it took. Parameters and
     # results are never stored; of a write, the records and the names of
-    # the fields it set are, never the values.
+    # the fields it set are, never the values; of an action, its name and
+    # the records it ran on.
     user_id = fields.Many2one("res.users", readonly=True, index=True, ondelete="set null")
     client_id = fields.Many2one(
         "o3p.mcp.client", string="MCP client", readonly=True, ondelete="set null"
     )
     op = fields.Char(string="Operation", readonly=True)
+    action = fields.Char(
+        string="Exposed action", readonly=True, help="The exposed action a call named."
+    )
     model = fields.Char(readonly=True)
     tables = fields.Char(readonly=True, help="Tables an SQL query read, comma-separated.")
     status = fields.Integer(string="HTTP status", readonly=True)
