@@ -332,7 +332,10 @@ class TestApiAction(O3pMcpApiCase):
             on_users.o3p_mcp_available = True
             on_users.flush_recordset()
         # The switch is on the server action's form, in its Usage tab.
-        arch = ServerAction.get_view(self.env.ref("base.view_server_action_form").id, "form")["arch"]
+        view = self.env.ref("o3p_mcp.view_server_action_form_o3p_mcp")
+        self.assertEqual(view.inherit_id, self.env.ref("base.view_server_action_form"))
+        self.assertIn('name="o3p_mcp_available"', view.arch)
+        arch = ServerAction.get_view(view.inherit_id.id, "form")["arch"]
         self.assertIn('name="o3p_mcp_available"', arch)
         # Deleting the server action removes its exposed action.
         archive.unlink()
