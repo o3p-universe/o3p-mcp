@@ -79,6 +79,16 @@ class O3pMcpApiWrite(models.AbstractModel):
             and not self._model_hides_on_read(name)
         )
 
+    def _model_can_be_opened(self, name):
+        """Tell whether records of model ``name`` could be written once an
+        administrator lists it: the model is exposed and is not one the API
+        never writes."""
+        return (
+            self._exposed_model(name)
+            and not any(fnmatch.fnmatchcase(name, item) for item in WRITE_NEVER)
+            and not self._model_hides_on_read(name)
+        )
+
     def _write_model(self, name, operation):
         """Return model ``name`` for the user's ``create`` or ``write``, or raise."""
         model = self._model(name)

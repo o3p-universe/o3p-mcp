@@ -1,8 +1,10 @@
+import fnmatch
 import os
 import re
 from urllib.parse import urlsplit, urlunsplit
 
 import requests
+from markupsafe import Markup
 
 from odoo import api, fields, models
 from odoo.exceptions import UserError
@@ -39,6 +41,8 @@ from .oauth import (
 
 
 HEALTH_TIMEOUT = 10
+# The most models the summary of the writable models names per pattern.
+SUMMARY_MODELS = 5
 SQL_NAME_RE = re.compile(r"[a-z_][a-z0-9_]{0,40}")
 SQL_HOST_RE = re.compile(r"[A-Za-z0-9._:\[\]/-]{1,253}")
 MAX_ACCESS_TOKEN_MINUTES = 24 * 60
@@ -123,6 +127,18 @@ class ResConfigSettings(models.TransientModel):
         string="Writable models",
         help="Models whose records MCP record editors may create and change, one "
         "pattern per line (* matches anything). Empty: nothing can be written.",
+    )
+    # A helper of the form, never stored: the model picked is added to the
+    # list above as its technical name.
+    o3p_mcp_api_writable_add_id = fields.Many2one(
+        "ir.model",
+        string="Add a model",
+        domain=lambda self: self._o3p_mcp_api_writable_candidates(),
+        help="Search a model by its name to add it to the writable models.",
+    )
+    o3p_mcp_api_writable_summary = fields.Html(
+        string="What the list opens",
+        compute="_compute_o3p_mcp_api_writable_summary",
     )
     o3p_mcp_api_max_response_kb = fields.Integer(
         string="Largest answer (KB)",
@@ -217,6 +233,65 @@ class ResConfigSettings(models.TransientModel):
             )
         for settings in self:
             settings.o3p_mcp_sql_password_source = source
+
+    @api.model
+    def _o3p_mcp_api_writable_candidates(self):
+        """The models that can be opened for writing, as a domain on ir.model."""
+        data_api = self.env["o3p.mcp.api"].sudo()
+        names = [name for name in self.env.registry if data_api._model_can_be_opened(name)]
+        return [("model", "in", sorted(names))]
+
+    @api.onchange("o3p_mcp_api_writable_add_id")
+    def _onchange_o3p_mcp_api_writable_add_id(self):
+        name = self.o3p_mcp_api_writable_add_id.model
+        if not name:
+            return
+        self.o3p_mcp_api_writable_add_id = False
+        listed = patterns(self.o3p_mcp_api_writable_models, ())
+        if not any(fnmatch.fnmatchcase(name, item) for item in listed):
+            self.o3p_mcp_api_writable_models = "\n".join([*listed, name])
+
+    @api.depends("o3p_mcp_api_writable_models")
+    def _compute_o3p_mcp_api_writable_summary(self):
+        """Say in words what each line of the writable models opens."""
+        data_api = self.env["o3p.mcp.api"].sudo()
+        labels = {
+            row["model"]: row["name"]
+            for row in self.env["ir.model"].sudo().search_read([], ["model", "name"])
+        }
+        for settings in self:
+            items = []
+            for pattern in patterns(settings.o3p_mcp_api_writable_models, ()):
+                matched = sorted(name for name in labels if fnmatch.fnmatchcase(name, pattern))
+                opened = [name for name in matched if data_api._model_can_be_opened(name)]
+                if not matched:
+                    text = self.env._("no model has this name")
+                elif not opened:
+                    text = self.env._("not writable through MCP")
+                elif opened == [pattern]:
+                    text = labels[pattern]
+                else:
+                    text = ", ".join(
+                        f"{labels[name]} ({name})" for name in opened[:SUMMARY_MODELS]
+                    )
+                    if len(opened) > SUMMARY_MODELS:
+                        text = self.env._(
+                            "%(models)s and %(count)s more",
+                            models=text,
+                            count=len(opened) - SUMMARY_MODELS,
+                        )
+                    if len(opened) < len(matched):
+                        text = self.env._(
+                            "%(models)s; %(count)s left out, not writable through MCP",
+                            models=text,
+                            count=len(matched) - len(opened),
+                        )
+                items.append(Markup("<li><code>%s</code>: %s</li>") % (pattern, text))
+            settings.o3p_mcp_api_writable_summary = (
+                Markup("<ul>%s</ul>") % Markup().join(items)
+                if items
+                else Markup("<p>%s</p>") % self.env._("Nothing can be written.")
+            )
 
     @api.model
     def get_values(self):

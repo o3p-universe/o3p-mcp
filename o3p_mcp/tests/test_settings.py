@@ -1,3 +1,4 @@
+import html
 import re
 from unittest.mock import patch
 
@@ -5,6 +6,7 @@ import requests
 
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tests import Form, TransactionCase, new_test_user, tagged
+from odoo.tools import file_path
 
 from ..models.denylist import DEFAULT_DENIED_FIELDS
 from ..models.oauth import OAuthError, get_config, get_config_int, set_config
@@ -203,6 +205,88 @@ class TestSettings(O3pMcpCommon, TransactionCase):
             with self.subTest(values=values), self.assertRaises(UserError):
                 self.env["res.config.settings"].create(values).execute()
 
+    def summary(self, form):
+        """What the form says each line of the writable models opens."""
+        return [
+            (pattern, html.unescape(text))
+            for pattern, text in re.findall(
+                r"<li><code>(.*?)</code>: (.*?)</li>", form.o3p_mcp_api_writable_summary
+            )
+        ]
+
+    def test_writable_models_are_picked_by_name_and_described(self):
+        Model = self.env["ir.model"]
+        partner = Model._get("res.partner")
+        tag = Model._get("res.partner.category")
+        with Form(self.env["res.config.settings"]) as form:
+            self.assertEqual(form.o3p_mcp_api_writable_summary, "<p>Nothing can be written.</p>")
+            # Picking a model adds its technical name and empties the picker.
+            form.o3p_mcp_api_writable_add_id = partner
+            self.assertFalse(form.o3p_mcp_api_writable_add_id)
+            self.assertEqual(form.o3p_mcp_api_writable_models, "res.partner")
+            self.assertEqual(self.summary(form), [("res.partner", partner.name)])
+            form.o3p_mcp_api_writable_add_id = tag
+            self.assertEqual(form.o3p_mcp_api_writable_models, "res.partner\nres.partner.category")
+            # A model a line already covers is not added again.
+            form.o3p_mcp_api_writable_add_id = partner
+            self.assertEqual(form.o3p_mcp_api_writable_models, "res.partner\nres.partner.category")
+            form.o3p_mcp_api_writable_models = "res.partner.*"
+            form.o3p_mcp_api_writable_add_id = tag
+            self.assertEqual(form.o3p_mcp_api_writable_models, "res.partner.*")
+            # The summary says what each line opens.
+            form.o3p_mcp_api_writable_models = (
+                "res.partner.category\nres.partner*\nres.user*\nno.such.model\nir.cron\nres.config.settings"
+            )
+            lines = self.summary(form)
+            self.assertEqual(lines[0], ("res.partner.category", tag.name))
+            self.assertEqual(lines[1][0], "res.partner*")
+            self.assertTrue(lines[1][1].startswith(f"{partner.name} (res.partner), "), lines[1])
+            self.assertIn(f"{tag.name} (res.partner.category)", lines[1][1])
+            self.assertEqual(
+                lines[2:],
+                [
+                    ("res.user*", "not writable through MCP"),
+                    ("no.such.model", "no model has this name"),
+                    ("ir.cron", "not writable through MCP"),
+                    ("res.config.settings", "not writable through MCP"),
+                ],
+            )
+            # A pattern is text, never markup.
+            form.o3p_mcp_api_writable_models = "<b>x</b>"
+            self.assertNotIn("<b>", form.o3p_mcp_api_writable_summary)
+            self.assertEqual(self.summary(form), [("&lt;b&gt;x&lt;/b&gt;", "no model has this name")])
+            form.o3p_mcp_api_writable_models = "res.partner\nres.partner.category"
+        form.record.execute()
+        self.assertEqual(
+            self.env["ir.config_parameter"].get_param("o3p_mcp.api_writable_models"),
+            "res.partner\nres.partner.category",
+        )
+
+    def test_the_picker_offers_only_models_that_can_be_opened(self):
+        description = self.env["res.config.settings"].fields_get(["o3p_mcp_api_writable_add_id"])
+        (leaf,) = description["o3p_mcp_api_writable_add_id"]["domain"]
+        self.assertEqual(tuple(leaf[:2]), ("model", "in"))
+        offered = set(leaf[2])
+        self.assertLessEqual({"res.partner", "res.partner.category", "res.country"}, offered)
+        # Never writable, hidden, without records of their own, or unknown.
+        for name in (
+            "ir.cron",
+            "res.users",
+            "res.groups",
+            "mail.message",
+            "o3p.mcp.token",
+            "ir.config_parameter",
+            "res.config.settings",
+            "base",
+            "no.such.model",
+        ):
+            with self.subTest(model=name):
+                self.assertNotIn(name, offered)
+        # Hiding a model takes it off the list.
+        self.env["ir.config_parameter"].set_param("o3p_mcp.api_denied_models", "res.country")
+        description = self.env["res.config.settings"].fields_get(["o3p_mcp_api_writable_add_id"])
+        self.assertNotIn("res.country", description["o3p_mcp_api_writable_add_id"]["domain"][0][2])
+
     def test_views_load(self):
         views = self.env["o3p.mcp.api.log"].get_views([(False, "list"), (False, "search")])
         self.assertEqual(set(views["views"]), {"list", "search"})
@@ -223,9 +307,15 @@ class TestSettings(O3pMcpCommon, TransactionCase):
             "action_o3p_mcp_check_health",
             "o3p_mcp_api_denied_models",
             "o3p_mcp_api_denied_fields",
+            "o3p_mcp_api_writable_models",
+            "o3p_mcp_api_writable_add_id",
+            "o3p_mcp_api_writable_summary",
             "o3p_mcp_api_timeout_seconds",
         ):
             self.assertIn(name, arch)
+        # The Settings section shows the addon's icon, which Odoo takes from
+        # this path.
+        self.assertTrue(file_path("o3p_mcp/static/description/icon.png"))
         for xmlid in (
             "o3p_mcp.menu_o3p_mcp_client",
             "o3p_mcp.menu_o3p_mcp_token",
