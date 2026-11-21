@@ -173,6 +173,7 @@ REASONS = {
     "bad_granularity": "Only date and datetime fields take a granularity: day, week, month, quarter or year, and hour for datetimes.",
     "model_not_writable": "The administrator has not opened this model for writing through MCP.",
     "no_write_access": "The user may not create or change records of this model in Odoo.",
+    "no_wizard_access": "The user may not use this wizard in Odoo.",
     "no_record_access": "The user may not change one of these records in Odoo.",
     "not_writable": "The field is read-only, computed, related, hidden or of a type that cannot be written; describe marks the writable fields.",
     "unknown_record": "A record id does not exist or the user may not read it.",
@@ -181,6 +182,7 @@ REASONS = {
     "unknown_action": "Call the actions operation (odoo_find_actions) to list the actions you may run.",
     "action_unavailable": "The action cannot run as it is defined; an administrator sees why in Settings, Technical, MCP, Exposed actions.",
     "record_count": "Give as many record ids as the action takes; describe_action tells how many.",
+    "no_inputs": "This action takes no values; describe_action lists the inputs of an action.",
 }
 # Hints that replace no_model_access for some models.
 MODEL_HINTS = {
@@ -233,7 +235,11 @@ class O3pMcpApi(models.AbstractModel):
         # The exposed actions live in api_action.py.
         "actions": ("_op_actions", SCOPE_ODOO_READ, {"query", "model", "limit", "offset"}),
         "describe_action": ("_op_describe_action", SCOPE_ODOO_READ, {"action"}),
-        "run_action": ("_op_run_action", SCOPE_ODOO_WRITE, {"action", "ids", "company"}),
+        "run_action": (
+            "_op_run_action",
+            SCOPE_ODOO_WRITE,
+            {"action", "ids", "values", "company"},
+        ),
     }
     _WRITE_OPS = frozenset({"create", "update", "run_action"})
     # Operations that name an exposed action: the call log records the name.

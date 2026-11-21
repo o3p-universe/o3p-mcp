@@ -1,13 +1,27 @@
+import fnmatch
 from contextlib import contextmanager
 
 from odoo import models
 
-from .api import MAX_MODELS, MAX_MODELS_OFFSET, MAX_QUERY_LENGTH, MSG_RANGE, invalid
-from .api_write import MAX_MESSAGE, MSG_WRITE, refused
-from .mcp_action import NAME_RE
+from .api import (
+    MAX_MODELS,
+    MAX_MODELS_OFFSET,
+    MAX_QUERY_LENGTH,
+    MSG_RANGE,
+    SAFE_NAME_RE,
+    invalid,
+)
+from .api_write import MAGIC_FIELDS, MAX_MESSAGE, MSG_VALUES, MSG_WRITE, WRITE_NEVER, refused
+from .mcp_action import NAME_RE, WIZARD_NEVER
 
 
 MAX_NAME = 200
+# The longest text of a wizard field in an answer: a review summary fits.
+MAX_FORM_TEXT = 4000
+FORM_TYPES = frozenset(
+    {"char", "text", "integer", "float", "monetary", "boolean", "date", "datetime", "selection",
+     "many2one", "many2many"}
+)
 MSG_COMMITS = (
     "The action ends the database transaction itself, which is not allowed "
     "through MCP: nothing was changed."
@@ -21,6 +35,20 @@ class O3pMcpApiAction(models.AbstractModel):
     # ------------------------------------------------------------------
     # The actions a user may run
     # ------------------------------------------------------------------
+
+    def _wizard_can_be_exposed(self, name):
+        """Tell whether the wizard ``name`` may be exposed at all: a transient
+        model that is not hidden and not one that changes the system, gives
+        access or sends messages."""
+        if not isinstance(name, str) or name not in self.env.registry:
+            return False
+        model = self.env[name]
+        return bool(
+            model._transient
+            and not model._abstract
+            and not self._model_denied(name)
+            and not any(fnmatch.fnmatchcase(name, item) for item in (*WRITE_NEVER, *WIZARD_NEVER))
+        )
 
     def _action_for_user(self, action):
         """Tell whether the user is one of those ``action`` is exposed to."""
@@ -43,7 +71,80 @@ class O3pMcpApiAction(models.AbstractModel):
             groups = action.server_action_id.group_ids
             if groups and not groups & self.env.user.all_group_ids:
                 return "no_write_access"
+        if action.kind == "wizard" and not self.env[action.wizard_model_id.model].has_access("create"):
+            return "no_wizard_access"
         return None
+
+    def _action_inputs(self, action):
+        """Return the wizard fields the user may set through ``action``."""
+        if action.kind != "wizard":
+            return {}
+        wizard = self.env[action.wizard_model_id.model]
+        allowed = action._wizard_input_fields()
+        return {
+            name: field
+            for name, field in wizard._fields.items()
+            if name in allowed
+            and wizard.has_field_access(field, "read")
+            and wizard.has_field_access(field, "write")
+        }
+
+    def _wizard_context(self, action, records):
+        """Return the context a wizard of ``action`` opens with for
+        ``records``: the active records, as Odoo's web client names them, the
+        record in the wizard's own field and the action's fixed values."""
+        context = {f"default_{key}": value for key, value in action._default_values().items()}
+        if records is None:
+            return context
+        context.update(
+            active_model=records._name,
+            active_ids=records.ids,
+            active_id=records.ids[0] if records else False,
+        )
+        if action.record_field and records:
+            wizard = self.env[action.wizard_model_id.model]
+            single = wizard._fields[action.record_field].type == "many2one"
+            context[f"default_{action.record_field}"] = records.id if single else records.ids
+        return context
+
+    def _input_descriptions(self, action):
+        """Describe the inputs of ``action`` for the user: label, type,
+        relation, selection values, whether required, help, and the default
+        a new wizard gets without a record."""
+        inputs = self._action_inputs(action)
+        if not inputs:
+            return []
+        wizard = self.env[action.wizard_model_id.model].with_context(
+            self._wizard_context(action, None)
+        )
+        descriptions = wizard.fields_get(
+            list(inputs), attributes=["string", "type", "relation", "required", "selection", "help"]
+        )
+        try:
+            with self.env.cr.savepoint():
+                defaults = wizard.default_get(list(inputs))
+        except Exception:  # noqa: BLE001 - a wizard may need its record to compute defaults
+            defaults = {}
+        result = []
+        for name in sorted(descriptions):
+            description = descriptions[name]
+            item = {
+                "name": name,
+                "string": description.get("string") or name,
+                "type": description.get("type"),
+                "required": bool(description.get("required")),
+            }
+            if description.get("relation"):
+                item["relation"] = description["relation"]
+            if isinstance(description.get("selection"), (list, tuple)):
+                item["selection"] = [[key, label] for key, label in description["selection"]]
+            if description.get("help"):
+                item["help"] = description["help"]
+            default = defaults.get(name)
+            if type(default) in (str, int, float, bool) and default not in (False, ""):
+                item["default"] = default[:MAX_NAME] if isinstance(default, str) else default
+            result.append(item)
+        return result
 
     def _runnable_actions(self):
         """Return the exposed actions the user may run now, by name."""
@@ -77,7 +178,7 @@ class O3pMcpApiAction(models.AbstractModel):
             "kind": action.kind,
             "model": action.model_id.model or None,
             "records": [action.min_records, action.max_records],
-            "inputs": [],
+            "inputs": sorted(self._action_inputs(action)),
         }
 
     # ------------------------------------------------------------------
@@ -98,17 +199,80 @@ class O3pMcpApiAction(models.AbstractModel):
         ids = list(dict.fromkeys(ids))
         if not action.min_records <= len(ids) <= action.max_records:
             raise invalid("record_count", "ids")
-        problem = self._action_rights_problem(action)
-        if problem:
-            raise invalid(
-                problem, model=action.model_id.model, code="access_denied", message=MSG_WRITE
-            )
+        self._check_action_rights(action)
+        if not action.model_id:
+            return None
         model = self.env[action.model_id.model]
         if ids and model.with_context(active_test=False).search_count([("id", "in", ids)]) != len(ids):
             raise invalid("unknown_record", "ids")
         records = model.browse(ids)
         records.check_access("write")
         return records
+
+    def _check_action_rights(self, action):
+        """Raise when Odoo does not give the user what ``action`` needs."""
+        problem = self._action_rights_problem(action)
+        if problem:
+            model = action.wizard_model_id if problem == "no_wizard_access" else action.model_id
+            raise invalid(problem, model=model.model, code="access_denied", message=MSG_WRITE)
+
+    def _run_wizard(self, action, records, values, company):
+        """Create the wizard of ``action`` for ``records`` with ``values``
+        and press its buttons; return what the last one answered, the wizard
+        and the names of the values given."""
+        wizard = self._in_company(self.env[action.wizard_model_id.model], company).with_context(
+            o3p_mcp_write=True, **self._wizard_context(action, records)
+        )
+        inputs = self._action_inputs(action)
+        if values is None or values == {}:
+            vals = {}
+        elif not inputs:
+            raise invalid("no_inputs", "values", message=MSG_VALUES)
+        else:
+            vals = self._write_values(wizard, values, inputs)
+        self._check_required(wizard, [vals])
+        record = wizard.create(vals)
+        returned = None
+        for step in action._step_names():
+            returned = getattr(record, step)()
+            # A button may answer with a wizard of the same kind that takes
+            # over: the next button is pressed on that one.
+            if (
+                isinstance(returned, dict)
+                and returned.get("res_model") == wizard._name
+                and type(returned.get("res_id")) is int
+                and returned["res_id"] != record.id
+            ):
+                successor = wizard.browse(returned["res_id"]).exists()
+                if successor and successor.create_uid == self.env.user:
+                    record = successor
+        return returned, record, set(vals)
+
+    def _form(self, wizard):
+        """Return what the wizard shows after its last button: its readable
+        fields, texts cut short. A review summary comes back here."""
+        wizard = wizard.exists()
+        if not wizard or not wizard.has_access("read"):
+            return None
+        names = [
+            name
+            for name, field in self._readable_fields(wizard).items()
+            if name not in MAGIC_FIELDS
+            and field.type in FORM_TYPES
+            and (
+                not field.relational
+                or (
+                    self._exposed_model(field.comodel_name)
+                    and self.env[field.comodel_name].has_access("read")
+                )
+            )
+        ]
+        values = wizard.read(names)[0]
+        return {
+            name: value[:MAX_FORM_TEXT] if isinstance(value, str) else value
+            for name, value in values.items()
+            if name in names and value not in (False, None, "", [])
+        }
 
     @contextmanager
     def _no_commit(self):
@@ -144,8 +308,9 @@ class O3pMcpApiAction(models.AbstractModel):
 
     def _returned(self, value):
         """Describe the action a button answered with: what Odoo would open
-        next for the user. Only its kind, its name, a notification's text and
-        the model and record it points to, when the user may read them."""
+        next for the user. Only its kind, its name, a client action's tag, a
+        notification's text and the model and record it points to, when the
+        user may read them."""
         if not isinstance(value, dict):
             return None
         kind = value.get("type")
@@ -165,18 +330,23 @@ class O3pMcpApiAction(models.AbstractModel):
                     res_id = value.get("res_id")
                     if type(res_id) is int and res_id > 0:
                         result["ids"] = self.env[model].browse(res_id).exists()._filtered_access("read").ids
-        elif kind == "ir.actions.client" and value.get("tag") == "display_notification":
+        elif kind == "ir.actions.client":
+            tag = value.get("tag")
+            if isinstance(tag, str) and SAFE_NAME_RE.fullmatch(tag):
+                result["tag"] = tag
             params = value.get("params")
             for key in ("title", "message"):
-                text = params.get(key) if isinstance(params, dict) else None
+                text = params.get(key) if isinstance(params, dict) and tag == "display_notification" else None
                 if isinstance(text, str) and text:
                     result[key] = text[:MAX_MESSAGE]
         return result
 
-    def _acted(self, action, records, returned):
+    def _acted(self, action, records, returned, form=None, names=()):
         """Return the answer and the call-log values of a run on ``records``."""
-        existing = records.exists()
-        readable = existing._filtered_access("read")
+        ids = records.ids if records is not None else []
+        existing = records.exists() if ids else []
+        # A record the action moved out of the user's sight keeps its id only.
+        readable = existing._filtered_access("read") if ids else []
         result = {
             "done": True,
             "records": [
@@ -186,11 +356,18 @@ class O3pMcpApiAction(models.AbstractModel):
                 for record in existing
             ],
         }
+        if form:
+            result["form"] = form
         described = self._returned(returned)
         if described:
             result["returned"] = described
-        log = {"record_ids": ",".join(str(record_id) for record_id in records.ids)[:1000]}
-        return result, records._name, len(records), log
+        log = {}
+        if ids:
+            log["record_ids"] = ",".join(str(record_id) for record_id in ids)[:1000]
+        if names:
+            log["field_names"] = ",".join(sorted(names))[:1000]
+        model = action.model_id.model or action.wizard_model_id.model
+        return result, model, len(ids), log
 
     # ------------------------------------------------------------------
     # Operations
@@ -230,21 +407,30 @@ class O3pMcpApiAction(models.AbstractModel):
 
     def _op_describe_action(self, params):
         action = self._action(params.get("action"))
-        problem = self._action_rights_problem(action)
-        if problem:
-            raise invalid(problem, model=action.model_id.model, code="access_denied")
+        self._check_action_rights(action)
+        steps = {"method": [action.method], "wizard": action._step_names()}
         result = {
             **self._action_entry(action),
+            "inputs": self._input_descriptions(action),
             "summary": action.summary,
-            "steps": [action.method] if action.kind == "method" else [],
+            "steps": steps.get(action.kind, []),
         }
-        return result, action.model_id.model or None, 1
+        if action.kind == "wizard":
+            result["wizard"] = action.wizard_model_id.model
+        return result, action.model_id.model or action.wizard_model_id.model or None, 1
 
     def _op_run_action(self, params):
         action = self._action(params.get("action"))
         records = self._action_records(action, params.get("ids"))
-        records = self._in_company(records, params.get("company")).with_context(o3p_mcp_write=True)
+        company, values = params.get("company"), params.get("values")
+        if action.kind != "wizard" and values not in (None, {}):
+            raise invalid("no_inputs", "values", message=MSG_VALUES)
+        if records is not None:
+            records = self._in_company(records, company).with_context(o3p_mcp_write=True)
         with self._no_commit():
+            if action.kind == "wizard":
+                returned, wizard, names = self._run_wizard(action, records, values, company)
+                return self._acted(action, records, returned, self._form(wizard), names)
             if action.kind == "method":
                 returned = getattr(records, action.method)()
             else:

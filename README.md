@@ -285,7 +285,8 @@ field reached through a path belongs to), `reason` one of `unknown_param`,
 `granularity_required` or `bad_granularity`, for writes also
 `model_not_writable`, `no_write_access`, `no_record_access`, `not_writable`,
 `unknown_record`, `required_missing` or `bad_company`, for actions
-`unknown_action`, `action_unavailable` or `record_count`, and `hint` a fixed sentence for
+`unknown_action`, `action_unavailable`, `record_count`, `no_inputs` or
+`no_wizard_access`, and `hint` a fixed sentence for
 that reason (for `hr.employee`: use `hr.employee.public`). Details contain
 schema names and fixed texts only, never record data or Odoo's own error
 text.
@@ -461,8 +462,9 @@ its external API.
 
 ### Actions
 
-Confirming a document or changing its status is not a field write in Odoo:
-it is a button. An administrator exposes such buttons one by one in
+Confirming a document, changing its status or moving it with a reason is
+not a field write in Odoo: it is a button, often one that first asks for
+values in a wizard. An administrator exposes such buttons one by one in
 **Settings › Technical › MCP › Exposed actions**. None is exposed by
 default, and a client can only name an exposed action, never a method.
 
@@ -471,10 +473,27 @@ description written for the assistant, and is one of:
 
 - a **record button**: a method of a model, called on the chosen records
   without arguments, as a button of type `object` does in a form view;
-- a **server action** of a model.
+- a **server action** of a model;
+- a **wizard**: a transient model. The wizard is created for the chosen
+  records with the caller's values, and its buttons are pressed in the
+  order the action names, in one call.
 
-It says how many records one call takes (one by default, at most 100) and
-may name groups: then only their users may run it.
+It says how many records one call takes (one by default, at most 100; a
+wizard may take none) and may name groups: then only their users may run
+it.
+
+A wizard action also holds:
+
+| Field | Meaning |
+|---|---|
+| Field for the records | The wizard's many-to-one or many-to-many field that receives the record or records. Empty when the wizard reads `active_id` or `active_ids` itself; both are always set |
+| Fixed values | A JSON object of wizard fields the wizard always starts with, such as `{"operation": "cancel"}`: what the `context` of the button that opens the wizard sets. Two actions on one wizard can differ by them |
+| Buttons to press | The methods of the wizard's buttons, in order, such as `action_review, action_apply` (at most 10) |
+| Fields a caller may set | Names of wizard fields; empty means every field of the wizard the API can write. The record field and the fixed values are never among them |
+
+The form says in words what the action runs, with the fields a caller may
+set by label and name, so that the list can be narrowed to what a caller
+should decide.
 
 What can be exposed is checked when the action is saved and again whenever
 it is listed:
@@ -489,6 +508,18 @@ it is listed:
   scheduled job. The model it creates or updates records of, and the
   actions it runs in turn, pass the same check. Its code is not inspected:
   it is the administrator's own.
+- A wizard must be a transient model that is not hidden and not one of
+  those that change the system, give access to people or send messages:
+  `res.config*`, `base.module.*`, `base.language.*`, `base.import.*`,
+  `base_import.*`, `base.document.layout`, `base.enable.profiling.wizard`,
+  `reset.view.arch.wizard`, `wizard.ir.model.menu.create`,
+  `server.action.*`, `change.password.*`, `auth.*`, `auth_*`, `portal.*`,
+  `*.share.wizard`, `*.share.collaborator.wizard`, `mail.*`, `digest.*`,
+  `phone.blacklist.*`, `privacy.*`, and the patterns the API never writes.
+  Its buttons pass the check of a record button; its record field must link
+  to the model of the records; fixed values and inputs must be fields of
+  the wizard, inputs of a type the API writes (no binary field, no
+  one-to-many lines).
 
 An action that no longer passes, for example because an upgrade removed its
 method, is marked in the list with the reason and answers
@@ -497,16 +528,19 @@ method, is marked in the list with the reason and answers
 | Operation | Parameters | Result |
 |---|---|---|
 | `actions` | `query`? (matched on the name, title, description and model), `model`?, `limit` (1–50, default 50), `offset`? (0–10000) | `{ "actions": [{ "name", "title", "description", "kind", "model", "records": [fewest, most], "inputs" }], "total", "truncated" }`: the actions the user may run, sorted by name |
-| `describe_action` | `action` | The entry of `actions`, with `summary` (what runs, in words) and `steps` (the methods called, in order) |
-| `run_action` | `action`, `ids` (as many as the action takes), `company`? | `{ "done": true, "records": [{ "id", "display_name" }], "returned"? }` |
+| `describe_action` | `action` | The entry of `actions`, with `inputs` as `[{ "name", "string", "type", "relation"?, "required", "selection"?, "help"?, "default"? }]`, `summary` (what runs, in words), `steps` (the methods called, in order) and, for a wizard, `wizard` (its model) |
+| `run_action` | `action`, `ids` (as many as the action takes), `values`? (a wizard's inputs), `company`? | `{ "done": true, "records": [{ "id", "display_name" }], "form"?, "returned"? }` |
 
 `actions` and `describe_action` need the scope `odoo.read`, `run_action`
 the scope `odoo.write`. The actions a user may run are those exposed to
 them (no groups on the action, or one of them held) for which Odoo gives
-the user write access on the model of the records and, for a server action
-limited to groups, one of its groups. A name that does not exist and an
-action exposed to other groups get the same answer (`unknown_action`); a
-missing Odoo right is named (`no_write_access`).
+the user write access on the model of the records, for a server action
+limited to groups one of its groups, and for a wizard the right to create
+it (a wizard has access rows like any model). A name that does not exist
+and an action exposed to other groups get the same answer
+(`unknown_action`); a missing Odoo right is named (`no_write_access`,
+`no_wizard_access`). `inputs` lists the wizard fields this user may set;
+`default` is the value a new wizard starts with when no record is given.
 
 `run_action` runs the action as the signed-in user, after these checks:
 
@@ -515,25 +549,45 @@ missing Odoo right is named (`no_write_access`).
   for both) and change in Odoo (`no_record_access`), as Odoo requires of a
   server action.
 - `company` is one of the user's companies, as for a write.
+- `values` name inputs of the wizard only (`not_writable`, `unknown_field`;
+  `no_inputs` for an action that takes none) and follow the rules of
+  `create`: the same value formats, and a related record must be one the
+  user may read (`unknown_record`). A required input without a value or a
+  default is named before anything runs (`required_missing`).
 
 A record button is called on the records as Odoo's web client calls it; a
 server action runs as it does from the Action menu, where Odoo checks the
 action's groups and the write access again. As there, an "update record"
 or "create record" server action is applied by Odoo with administrator
-rights once that check has passed; code runs as the user.
+rights once that check has passed; code runs as the user. A wizard is
+created as the user with `active_model`, `active_id` and `active_ids` in
+the context, the record as the default of its record field and the fixed
+values as defaults; then each button is called on it. When a button
+answers with another wizard of the same model that the user just created,
+the next button is pressed on that one.
 
-The answer lists the records with their names after the run, and under
-`returned` what Odoo would open next, when the button answered with an
-action: its `type` and `name`, the `title` and `message` of a notification,
-and the `model` it opens, with `wizard: true` for a wizard and `ids` for a
-record the user may read. A button that answers with a wizard has not
-finished its work: Odoo is asking for more.
+The answer lists the records with their names after the run; under `form`
+what the wizard shows after its last button (its readable fields that have
+a value, texts cut at 4000 characters: a review summary comes back here);
+and under `returned` what Odoo would open next, when the last button
+answered with an action: its `type` and `name`, the `tag` of a client
+action, the `title` and `message` of a notification, and the `model` it
+opens, with `wizard: true` for a wizard and `ids` for a record the user
+may read. A record button that answers with a wizard has not finished its
+work: Odoo is asking for more.
 
 A run follows the rules of a write: it runs in a sub-transaction with the
 data API's time limit, Odoo's own refusal comes back as `query_error` with
 `details: { "message": … }`, and it is committed together with its row in
 the call log or not at all. Code that commits or rolls back the transaction
 itself is refused, and the call undone, because it would break that rule.
+
+Limits: onchange methods do not run, as with `create`, Odoo's import and
+its external API, while computed fields and defaults do. Nothing is kept
+between calls: a wizard runs from its creation to its last button in one
+call. An action that calls an outside service does so for real. The
+wizard's own record stays in the database, as after a click in Odoo, until
+Odoo's cleaning job removes it.
 
 ### SQL
 
@@ -656,7 +710,8 @@ in **Settings › Technical › MCP › API Calls**: time, user, MCP client,
 operation, model (for `sql`: the tables copied), HTTP status, error code,
 row count and duration, for `create` and `update` the ids of the records
 written and the names of the fields set, and for `describe_action` and
-`run_action` the name of the action and the ids of the records it ran on.
+`run_action` the name of the action, the ids of the records it ran on and
+the names of the wizard values given.
 Parameters, SQL queries, results and written values are never stored. Rows older than the configured number of days
 (default 30) are deleted by the daily scheduled action.
 
@@ -738,8 +793,9 @@ host and the SSL mode is weaker than `verify-full`.
   client deactivates its tokens; **Revoke all tokens** revokes them.
 - **Audiences**: the audiences, with their groups and the number of users
   in them.
-- **Exposed actions**: the buttons and server actions MCP users may run,
-  each with what it runs in words and, when it cannot run as defined, why.
+- **Exposed actions**: the buttons, server actions and wizards MCP users
+  may run, each with what it runs in words and, when it cannot run as
+  defined, why.
 - **API Calls**: the data API call log (read-only).
 - **Tokens**: issued tokens with user, client, scope, state (active,
   rotated, expired, revoked) and times. **Revoke**, on a token or on a

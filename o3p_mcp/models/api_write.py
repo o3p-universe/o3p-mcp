@@ -98,8 +98,8 @@ class O3pMcpApiWrite(models.AbstractModel):
             raise invalid("no_write_access", model=model._name, code="access_denied", message=MSG_WRITE)
         return model
 
-    def _field_writable(self, model, field):
-        """Tell whether the user may set ``field``, a readable field of ``model``.
+    def _field_takes_values(self, field):
+        """Tell whether the API sets ``field`` at all, whoever the user is.
 
         Odoo's ORM accepts values for fields declared read-only; the API does
         not. A related field is refused because it changes another record.
@@ -110,10 +110,13 @@ class O3pMcpApiWrite(models.AbstractModel):
             and not field.readonly
             and not field.related
             and (field.store or field.inverse)
-            and model.has_field_access(field, "write")
             and (field.type != "html" or (field.sanitize and not field.sanitize_overridable))
             and (not field.relational or self._exposed_model(field.comodel_name))
         )
+
+    def _field_writable(self, model, field):
+        """Tell whether the user may set ``field``, a readable field of ``model``."""
+        return self._field_takes_values(field) and model.has_field_access(field, "write")
 
     def _writable_fields(self, model):
         return {
@@ -204,11 +207,15 @@ class O3pMcpApiWrite(models.AbstractModel):
             return self._related_ids(model, field, [value], name)[0]
         raise invalid("not_writable", name, message=MSG_VALUES)
 
-    def _write_values(self, model, values):
-        """Return ``values`` converted for the ORM; every field writable."""
+    def _write_values(self, model, values, writable=None):
+        """Return ``values`` converted for the ORM; every field writable.
+
+        ``writable`` narrows the fields that take a value, by name.
+        """
         if not isinstance(values, dict) or not 0 < len(values) <= MAX_FIELDS:
             raise invalid("bad_value", "values", message=MSG_VALUES)
-        writable = self._writable_fields(model)
+        if writable is None:
+            writable = self._writable_fields(model)
         result = {}
         for name, value in values.items():
             if not isinstance(name, str) or name not in model._fields:
