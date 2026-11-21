@@ -275,6 +275,69 @@ class TestApiAction(O3pMcpApiCase):
         settings = self.env["res.config.settings"].create({})
         self.assertEqual(settings.o3p_mcp_action_count, 4)
 
+    def test_a_server_action_is_made_available_on_its_own_form(self):
+        ServerAction = self.env["ir.actions.server"]
+        archive = ServerAction.create(
+            {
+                "name": "MCPT: Archive stale contacts!",
+                "model_id": self.partner_model.id,
+                "state": "code",
+                "code": "records.write({'active': False})",
+            }
+        )
+        self.assertFalse(archive.o3p_mcp_available)
+        self.assertFalse(archive.o3p_mcp_action_id)
+        archive.o3p_mcp_available = True
+        archive.invalidate_recordset()
+        action = archive.o3p_mcp_action_id
+        self.assertTrue(archive.o3p_mcp_available)
+        self.assertEqual(
+            (action.name, action.title, action.kind, action.model_id, action.max_records),
+            ("mcpt-archive-stale-contacts", "MCPT: Archive stale contacts!", "server", self.partner_model, 1),
+        )
+        self.assertEqual(action.description, "Runs the server action MCPT: Archive stale contacts!.")
+        self.assertIn("mcpt-archive-stale-contacts", self.names())
+        # Off archives the exposed action; on brings the same one back.
+        archive.o3p_mcp_available = False
+        archive.invalidate_recordset()
+        self.assertFalse(action.active)
+        self.assertFalse(archive.o3p_mcp_available)
+        self.assertNotIn("mcpt-archive-stale-contacts", self.names())
+        archive.o3p_mcp_available = True
+        archive.invalidate_recordset()
+        self.assertEqual(archive.o3p_mcp_action_id, action)
+        self.assertTrue(action.active)
+        # One already exposed in the list shows as available; a name that is
+        # taken gets the server action's id.
+        self.assertTrue(self.server_action.o3p_mcp_available)
+        self.assertEqual(self.server_action.o3p_mcp_action_id, self.mark_reviewed)
+        twin = archive.copy({"name": "MCPT: Archive stale contacts!"})
+        twin.o3p_mcp_available = True
+        twin.invalidate_recordset()
+        self.assertEqual(twin.o3p_mcp_action_id.name, f"mcpt-archive-stale-contacts-{twin.id}")
+        numbered = archive.copy({"name": "2026 clean-up"})
+        numbered.o3p_mcp_available = True
+        numbered.invalidate_recordset()
+        self.assertEqual(numbered.o3p_mcp_action_id.name, "action-2026-clean-up")
+        # What cannot be exposed in the list cannot be switched on here.
+        on_users = ServerAction.create(
+            {
+                "name": "MCPT on users",
+                "model_id": self.env.ref("base.model_res_users").id,
+                "state": "code",
+                "code": "pass",
+            }
+        )
+        with self.assertRaises(ValidationError):
+            on_users.o3p_mcp_available = True
+            on_users.flush_recordset()
+        # The switch is on the server action's form, in its Usage tab.
+        arch = ServerAction.get_view(self.env.ref("base.view_server_action_form").id, "form")["arch"]
+        self.assertIn('name="o3p_mcp_available"', arch)
+        # Deleting the server action removes its exposed action.
+        archive.unlink()
+        self.assertFalse(action.exists())
+
     # ------------------------------------------------------------------
     # Listing
     # ------------------------------------------------------------------

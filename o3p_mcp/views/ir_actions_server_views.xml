@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- The switch sits where Odoo's own MCP server puts it: the Usage tab of
+         a server action. -->
+    <record id="view_server_action_form_o3p_mcp" model="ir.ui.view">
+        <field name="name">ir.actions.server.form.o3p_mcp</field>
+        <field name="model">ir.actions.server</field>
+        <field name="inherit_id" ref="base.view_server_action_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//page[@name='usage']" position="attributes">
+                <attribute name="invisible">usage != 'ir_actions_server'</attribute>
+            </xpath>
+            <xpath expr="//page[@name='usage']" position="inside">
+                <group name="o3p_mcp" string="MCP" groups="base.group_system">
+                    <field name="o3p_mcp_available"/>
+                    <field name="o3p_mcp_action_id"
+                           invisible="not o3p_mcp_action_id"
+                           options="{'no_create': True}"/>
+                </group>
+            </xpath>
+        </field>
+    </record>
+</odoo>

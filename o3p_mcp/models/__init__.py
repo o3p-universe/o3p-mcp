@@ -2,6 +2,7 @@ from . import oauth
 from . import res_groups
 from . import audience
 from . import mcp_action
+from . import ir_actions_server
 from . import mcp_client
 from . import mcp_code
 from . import mcp_token
