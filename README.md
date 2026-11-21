@@ -526,6 +526,12 @@ An action that no longer passes, for example because an upgrade removed its
 method, is marked in the list with the reason and answers
 `action_unavailable`.
 
+For programs that describe the exposed actions, such as a knowledge
+producer reading through Odoo's external API, each action has two computed
+fields: `summary`, what it runs in words, and `spec`, the same as data:
+`{ "inputs": [...], "steps": [...], "fixed": {...} }`, the inputs as
+`describe_action` gives them to the user who reads the field.
+
 | Operation | Parameters | Result |
 |---|---|---|
 | `actions` | `query`? (matched on the name, title, description and model), `model`?, `limit` (1–50, default 50), `offset`? (0–10000) | `{ "actions": [{ "name", "title", "description", "kind", "model", "records": [fewest, most], "inputs" }], "total", "truncated" }`: the actions the user may run, sorted by name |

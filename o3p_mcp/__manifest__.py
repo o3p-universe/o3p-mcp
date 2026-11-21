@@ -9,7 +9,7 @@
         "creates and updates records; it runs the buttons, server actions and "
         "wizards an administrator exposes. All with the rights of the signed-in user."
     ),
-    "version": "20.0.1.48.0",
+    "version": "20.0.1.49.0",
     "category": "Technical",
     "author": "O3P",
     "website": "https://github.com/o3p-universe/o3p-mcp",
