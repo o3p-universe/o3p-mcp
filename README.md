@@ -624,6 +624,17 @@ metadata URL and the introspection URL, and offers two buttons:
   (`https://mcp.example.com/mcp` → `https://mcp.example.com/health`) and
   reports the HTTP status.
 
+Under **Writable models**, **Add a model** searches the models by their name
+or technical name and adds the one picked to the list. It offers only the
+models that can be opened: not hidden, not among those the API never
+writes, and with records of their own. Below it the form says what each
+line of the list opens: the name of the model for an exact line, the models
+a pattern matches, and which lines match no model or none that can be
+written through MCP.
+
+The addon's icon, the O3P logo (`static/description/icon.png`), marks the
+MCP section of the Settings and the addon in the Apps list.
+
 The SQL block also shows where the sandbox password was found, and **Check
 SQL sandbox** logs in as every sandbox role and reports any problem: a role
 attribute (superuser, `CREATEROLE`, `CREATEDB`, replication, `BYPASSRLS`),

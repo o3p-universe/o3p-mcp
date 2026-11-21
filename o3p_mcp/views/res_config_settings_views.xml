@@ -71,7 +71,20 @@
                         <setting id="o3p_mcp_api_writable_models"
                                  string="Writable models"
                                  help="Models whose records users of MCP records / Editor may create and change with their own rights, one pattern per line (* matches anything). Empty: nothing can be written. Models that grant access, hold code or send messages are never writable.">
-                            <field name="o3p_mcp_api_writable_models"/>
+                            <field name="o3p_mcp_api_writable_models" placeholder="res.partner&#10;sale.order*"/>
+                            <div class="content-group">
+                                <div class="mt16">
+                                    <label for="o3p_mcp_api_writable_add_id" class="o_light_label"/>
+                                    <field name="o3p_mcp_api_writable_add_id"
+                                           class="w-100"
+                                           options="{'no_create': True, 'no_open': True}"
+                                           placeholder="Search by name, for example Contact"/>
+                                </div>
+                                <div class="mt16">
+                                    <label for="o3p_mcp_api_writable_summary" class="o_light_label"/>
+                                    <field name="o3p_mcp_api_writable_summary" class="w-100 text-muted"/>
+                                </div>
+                            </div>
                         </setting>
                         <setting id="o3p_mcp_api_limits"
                                  string="Limits"
