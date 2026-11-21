@@ -178,6 +178,8 @@ REASONS = {
     "unknown_record": "A record id does not exist or the user may not read it.",
     "required_missing": "Give a value for this required field.",
     "bad_company": "Use the id of one of the user's companies; the context operation (odoo_context) lists them.",
+    "unknown_action": "Call the actions operation (odoo_find_actions) to list the actions you may run.",
+    "action_unavailable": "The action cannot run as it is defined; an administrator sees why in Settings, Technical, MCP, Exposed actions.",
 }
 # Hints that replace no_model_access for some models.
 MODEL_HINTS = {
@@ -227,6 +229,9 @@ class O3pMcpApi(models.AbstractModel):
         # The writing operations live in api_write.py.
         "create": ("_op_create", SCOPE_ODOO_WRITE, {"model", "records", "company"}),
         "update": ("_op_update", SCOPE_ODOO_WRITE, {"model", "ids", "values", "company"}),
+        # The exposed actions live in api_action.py.
+        "actions": ("_op_actions", SCOPE_ODOO_READ, {"query", "model", "limit", "offset"}),
+        "describe_action": ("_op_describe_action", SCOPE_ODOO_READ, {"action"}),
     }
     _WRITE_OPS = frozenset({"create", "update"})
 

@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="mcp_action_view_list" model="ir.ui.view">
+        <field name="name">o3p.mcp.action.list</field>
+        <field name="model">o3p.mcp.action</field>
+        <field name="arch" type="xml">
+            <list string="MCP Exposed Actions" default_order="name" decoration-danger="problem">
+                <field name="name"/>
+                <field name="title"/>
+                <field name="kind"/>
+                <field name="model_id"/>
+                <field name="group_ids" widget="many2many_tags" optional="show"/>
+                <field name="problem" optional="show"/>
+                <field name="active" optional="hide"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="mcp_action_view_form" model="ir.ui.view">
+        <field name="name">o3p.mcp.action.form</field>
+        <field name="model">o3p.mcp.action</field>
+        <field name="arch" type="xml">
+            <form string="MCP Exposed Action">
+                <sheet>
+                    <div class="alert alert-warning" role="alert" invisible="not problem">
+                        <field name="problem" nolabel="1"/>
+                    </div>
+                    <div class="oe_title">
+                        <label for="title"/>
+                        <h1><field name="title" placeholder="Confirm a quotation"/></h1>
+                    </div>
+                    <group>
+                        <group>
+                            <field name="name" placeholder="confirm-quotation"/>
+                            <field name="kind"/>
+                            <field name="active"/>
+                        </group>
+                        <group>
+                            <field name="server_action_id"
+                                   invisible="kind != 'server'"
+                                   required="kind == 'server'"
+                                   options="{'no_create': True}"/>
+                            <field name="model_id"
+                                   readonly="kind == 'server'"
+                                   required="kind == 'method'"
+                                   options="{'no_create': True, 'no_open': True}"/>
+                            <field name="model_name" invisible="not model_id"/>
+                            <field name="method"
+                                   invisible="kind != 'method'"
+                                   required="kind == 'method'"
+                                   placeholder="action_confirm"/>
+                            <label for="min_records" string="Records per call"/>
+                            <div class="o_row">
+                                <field name="min_records" class="oe_inline"/>
+                                <span>to</span>
+                                <field name="max_records" class="oe_inline"/>
+                            </div>
+                        </group>
+                    </group>
+                    <group string="What it does">
+                        <field name="description"
+                               nolabel="1"
+                               colspan="2"
+                               placeholder="Confirms a quotation: it becomes a sales order and its number is fixed. Use it when the customer has accepted the quotation."/>
+                    </group>
+                    <group string="Who may run it">
+                        <field name="group_ids"
+                               widget="many2many_tags"
+                               options="{'no_create': True}"
+                               placeholder="Everyone Odoo lets change these records"/>
+                    </group>
+                    <group string="What it runs" invisible="not summary">
+                        <field name="summary" nolabel="1" colspan="2"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="mcp_action_view_search" model="ir.ui.view">
+        <field name="name">o3p.mcp.action.search</field>
+        <field name="model">o3p.mcp.action</field>
+        <field name="arch" type="xml">
+            <search string="MCP Exposed Actions">
+                <field name="title" filter_domain="['|', ('title', 'ilike', self), ('name', 'ilike', self)]"/>
+                <field name="model_id"/>
+                <field name="group_ids"/>
+                <filter name="archived" string="Archived" domain="[('active', '=', False)]"/>
+                <separator/>
+                <filter name="group_model" string="Model" context="{'group_by': 'model_id'}"/>
+                <filter name="group_kind" string="Kind" context="{'group_by': 'kind'}"/>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_mcp_action" model="ir.actions.act_window">
+        <field name="name">MCP Exposed Actions</field>
+        <field name="res_model">o3p.mcp.action</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">Expose an action</p>
+            <p>An exposed action is a button or a server action that users of MCP records / Editor may run on records they may change in Odoo. Nothing can be run until an action is listed here.</p>
+        </field>
+    </record>
+
+    <menuitem id="menu_o3p_mcp_action"
+              name="Exposed actions"
+              parent="menu_o3p_mcp_technical"
+              action="action_mcp_action"
+              groups="base.group_system"
+              sequence="20"/>
+</odoo>

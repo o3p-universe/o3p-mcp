@@ -8,7 +8,7 @@
         "separate PostgreSQL sandbox and, on the models an administrator opens, "
         "creates and updates records, all with the rights of the signed-in user."
     ),
-    "version": "20.0.1.45.0",
+    "version": "20.0.1.46.0",
     "category": "Technical",
     "author": "O3P",
     "website": "https://github.com/o3p-universe/o3p-mcp",
@@ -26,6 +26,7 @@
         "views/mcp_client_views.xml",
         "views/mcp_token_views.xml",
         "views/mcp_audience_views.xml",
+        "views/mcp_action_views.xml",
         "views/mcp_api_log_views.xml",
         "views/res_config_settings_views.xml",
     ],

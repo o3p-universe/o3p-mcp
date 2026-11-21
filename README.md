@@ -284,7 +284,8 @@ field reached through a path belongs to), `reason` one of `unknown_param`,
 `no_model_access`, `unknown_model`, `bad_operator`, `bad_order`, `bad_aggregate`,
 `granularity_required` or `bad_granularity`, for writes also
 `model_not_writable`, `no_write_access`, `no_record_access`, `not_writable`,
-`unknown_record`, `required_missing` or `bad_company`, and `hint` a fixed sentence for
+`unknown_record`, `required_missing` or `bad_company`, for actions
+`unknown_action` or `action_unavailable`, and `hint` a fixed sentence for
 that reason (for `hr.employee`: use `hr.employee.public`). Details contain
 schema names and fixed texts only, never record data or Odoo's own error
 text.
@@ -423,8 +424,8 @@ a call writes all of its records or none:
   hidden, not read-only on its definition, not computed without an inverse,
   not related to another record's field, and of a supported type
   (`not_writable`). Odoo's own ORM accepts values for read-only fields; the
-  API does not, so a status changes through Odoo's buttons, not by setting
-  the field. `describe` marks the writable fields.
+  API does not, so a status changes through Odoo's buttons (see Actions),
+  not by setting the field. `describe` marks the writable fields.
 - Values: JSON strings for char, text and html fields (html only where Odoo
   sanitises it), numbers for integer, float and monetary fields, booleans,
   `"YYYY-MM-DD"` for dates and `"YYYY-MM-DD HH:MM:SS"` in UTC for datetimes,
@@ -457,6 +458,53 @@ one call, never a mix.
 Restrictions that exist only in a form view, such as a field a view makes
 read-only for confirmed documents, do not apply, as for Odoo's import and
 its external API.
+
+### Actions
+
+Confirming a document or changing its status is not a field write in Odoo:
+it is a button. An administrator exposes such buttons one by one in
+**Settings › Technical › MCP › Exposed actions**. None is exposed by
+default, and a client can only name an exposed action, never a method.
+
+An exposed action has a name (the slug a client uses), a title and a
+description written for the assistant, and is one of:
+
+- a **record button**: a method of a model, called on the chosen records
+  without arguments, as a button of type `object` does in a form view;
+- a **server action** of a model.
+
+It says how many records one call takes (one by default, at most 100) and
+may name groups: then only their users may run it.
+
+What can be exposed is checked when the action is saved and again whenever
+it is listed:
+
+- The model of the records must be exposed, and must not be one the API
+  never writes (the list under Writing records) or one that hides data when
+  it is read. It need not be on the list of writable models.
+- A button's method must be one Odoo's web client may call (public, not
+  marked private), and not a method every model has, such as `write`,
+  `unlink`, `copy` or `export_data`.
+- A server action must be one of the Action menu's, not the code of a
+  scheduled job. The model it creates or updates records of, and the
+  actions it runs in turn, pass the same check. Its code is not inspected:
+  it is the administrator's own.
+
+An action that no longer passes, for example because an upgrade removed its
+method, is marked in the list with the reason and answers
+`action_unavailable`.
+
+| Operation | Parameters | Result |
+|---|---|---|
+| `actions` | `query`? (matched on the name, title, description and model), `model`?, `limit` (1–50, default 50), `offset`? (0–10000) | `{ "actions": [{ "name", "title", "description", "kind", "model", "records": [fewest, most], "inputs" }], "total", "truncated" }`: the actions the user may run, sorted by name |
+| `describe_action` | `action` | The entry of `actions`, with `summary` (what runs, in words) and `steps` (the methods called, in order) |
+
+Both need the scope `odoo.read`. The actions a user may run are those
+exposed to them (no groups on the action, or one of them held) for which
+Odoo gives the user write access on the model of the records and, for a
+server action limited to groups, one of its groups. A name that does not
+exist and an action exposed to other groups get the same answer
+(`unknown_action`); a missing Odoo right is named (`no_write_access`).
 
 ### SQL
 
@@ -632,6 +680,9 @@ line of the list opens: the name of the model for an exact line, the models
 a pattern matches, and which lines match no model or none that can be
 written through MCP.
 
+**Exposed actions** tells how many actions are exposed and opens their
+list.
+
 The addon's icon, the O3P logo (`static/description/icon.png`), marks the
 MCP section of the Settings and the addon in the Apps list.
 
@@ -657,6 +708,8 @@ host and the SSL mode is weaker than `verify-full`.
   client deactivates its tokens; **Revoke all tokens** revokes them.
 - **Audiences**: the audiences, with their groups and the number of users
   in them.
+- **Exposed actions**: the buttons and server actions MCP users may run,
+  each with what it runs in words and, when it cannot run as defined, why.
 - **API Calls**: the data API call log (read-only).
 - **Tokens**: issued tokens with user, client, scope, state (active,
   rotated, expired, revoked) and times. **Revoke**, on a token or on a
