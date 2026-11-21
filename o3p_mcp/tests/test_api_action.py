@@ -22,6 +22,7 @@ REVIEWED_WIZARDS = {
     "base.partner.merge.line": "a line of the merge wizard",
     "calendar.event.archive.or.unlink.wizard": "archives or deletes the user's own event",
     "calendar.event.multi.archive.or.unlink.wizard": "archives or deletes the user's own events",
+    "calendar.popover.delete.wizard": "deletes a calendar event the user may delete",
     "project.project.stage.delete.wizard": "archives or deletes project stages",
     "project.task.type.delete.wizard": "archives or deletes task stages",
     "project.template.create.wizard": "creates a project from a template",
@@ -904,6 +905,8 @@ class TestApiAction(O3pMcpApiCase):
             "base.import.module",
             "server.action.history.wizard",
             "privacy.lookup.wizard",
+            "calendar.provider.config",
+            "snailmail.letter.format.error",
         ):
             with self.subTest(name=name):
                 self.assertFalse(data_api._wizard_can_be_exposed(name))

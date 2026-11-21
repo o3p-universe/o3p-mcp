@@ -24,16 +24,18 @@ WIZARD_NEVER = (
     "reset.view.arch.wizard",
     "wizard.ir.model.menu.create",
     "server.action.*",
-    # Passwords, sign-in devices, access for people outside.
+    # Passwords, sign-in devices, credentials, access for people outside.
     "change.password.*",
     "auth.*",
     "auth_*",
     "portal.*",
     "*.share.wizard",
     "*.share.collaborator.wizard",
-    # Messages and the lists that stop them.
+    "calendar.provider.*",
+    # Messages, letters and the lists that stop them.
     "mail.*",
     "digest.*",
+    "snailmail.*",
     "phone.blacklist.*",
     # Looking a person up across every model.
     "privacy.*",

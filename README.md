@@ -514,8 +514,9 @@ it is listed:
   `base_import.*`, `base.document.layout`, `base.enable.profiling.wizard`,
   `reset.view.arch.wizard`, `wizard.ir.model.menu.create`,
   `server.action.*`, `change.password.*`, `auth.*`, `auth_*`, `portal.*`,
-  `*.share.wizard`, `*.share.collaborator.wizard`, `mail.*`, `digest.*`,
-  `phone.blacklist.*`, `privacy.*`, and the patterns the API never writes.
+  `*.share.wizard`, `*.share.collaborator.wizard`, `calendar.provider.*`,
+  `mail.*`, `digest.*`, `snailmail.*`, `phone.blacklist.*`, `privacy.*`,
+  and the patterns the API never writes.
   Its buttons pass the check of a record button; its record field must link
   to the model of the records; fixed values and inputs must be fields of
   the wizard, inputs of a type the API writes (no binary field, no
