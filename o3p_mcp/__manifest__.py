@@ -9,7 +9,7 @@
         "creates and updates records; it runs the buttons, server actions and "
         "wizards an administrator exposes. All with the rights of the signed-in user."
     ),
-    "version": "18.0.1.49.0",
+    "version": "18.0.1.50.0",
     "category": "Technical",
     "author": "O3P",
     "website": "https://github.com/o3p-universe/o3p-mcp",
@@ -28,6 +28,7 @@
         "views/mcp_token_views.xml",
         "views/mcp_audience_views.xml",
         "views/mcp_action_views.xml",
+        "views/ir_actions_server_views.xml",
         "views/mcp_api_log_views.xml",
         "views/res_config_settings_views.xml",
     ],

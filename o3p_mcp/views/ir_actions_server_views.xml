@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Odoo 18 has no Usage tab on a server action: the switch sits with the
+         groups, under Technical Settings (developer mode). -->
+    <record id="view_server_action_form_o3p_mcp" model="ir.ui.view">
+        <field name="name">ir.actions.server.form.o3p_mcp</field>
+        <field name="model">ir.actions.server</field>
+        <field name="inherit_id" ref="base.view_server_action_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='groups_id']" position="after">
+                <field name="o3p_mcp_available"
+                       invisible="usage != 'ir_actions_server'"
+                       groups="base.group_system"/>
+                <field name="o3p_mcp_action_id"
+                       invisible="not o3p_mcp_action_id"
+                       options="{'no_create': True}"
+                       groups="base.group_system"/>
+            </xpath>
+        </field>
+    </record>
+</odoo>

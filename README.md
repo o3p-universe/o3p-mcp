@@ -486,6 +486,15 @@ It says how many records one call takes (one by default, at most 100; a
 wizard may take none) and may name groups: then only their users may run
 it.
 
+A server action can also be exposed on its own form, with the switch
+**Available in MCP** under Technical Settings (developer mode), named as
+the switch of Odoo's own MCP server on Odoo 20. Switching it on creates the
+exposed action, named after the server action and for one record per call;
+the name, the description, the groups and the number of records are then
+set in the list of exposed actions, which the form links to. Switching it
+off archives the exposed action, and switching it on again brings the same
+one back.
+
 A wizard action also holds:
 
 | Field | Meaning |
