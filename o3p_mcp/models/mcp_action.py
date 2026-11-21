@@ -159,6 +159,14 @@ class O3pMcpAction(models.Model):
     active = fields.Boolean(default=True)
     summary = fields.Text(string="What it runs", compute="_compute_summary")
     problem = fields.Char(string="Cannot run", compute="_compute_summary")
+    spec = fields.Json(
+        string="Inputs and steps",
+        compute="_compute_spec",
+        help="What the action asks for and presses, as data: the inputs with "
+        "their label, type and default as the reader gets them, the buttons "
+        "pressed in order and the fixed values. Read by programs that describe "
+        "the exposed actions, such as a knowledge producer.",
+    )
 
     _sql_constraints = [
         ("name_unique", "UNIQUE (name)", "An exposed action with this name already exists."),
@@ -482,3 +490,16 @@ class O3pMcpAction(models.Model):
             )
             action.problem = action._definition_problem() if complete else False
             action.summary = action._summary() if complete and not action.problem else False
+
+    def _compute_spec(self):
+        data_api = self.env["o3p.mcp.api"]
+        steps = {"method": lambda action: [action.method], "wizard": lambda action: action._step_names()}
+        for action in self:
+            if not action.kind or action._definition_problem():
+                action.spec = False
+                continue
+            action.spec = {
+                "inputs": data_api._input_descriptions(action),
+                "steps": steps.get(action.kind, lambda action: [])(action),
+                "fixed": action._default_values() if action.kind == "wizard" else {},
+            }

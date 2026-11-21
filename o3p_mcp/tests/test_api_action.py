@@ -675,6 +675,13 @@ class TestApiAction(O3pMcpApiCase):
             ],
         )
         self.assertEqual((described["steps"], described["wizard"]), (["action_merge"], MERGE))
+        # The same as data on the action itself, for programs that describe it.
+        action = self.Action.search([("name", "=", "merge-contacts")])
+        self.assertEqual(
+            action.spec, {"inputs": described["inputs"], "steps": ["action_merge"], "fixed": {}}
+        )
+        self.assertEqual(self.open_company.spec, {"inputs": [], "steps": ["open_commercial_entity"], "fixed": {}})
+        self.assertEqual(self.mark_reviewed.spec, {"inputs": [], "steps": [], "fixed": {}})
         self.assertEqual(
             described["summary"],
             "Opens the wizard Merge Partner Wizard (base.partner.merge.automatic.wizard) for "
